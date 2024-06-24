@@ -431,6 +431,12 @@ class EvalCallback(BaseCallback):
 
         self.histogram_training_locations = defaultdict(def_value)
 
+    @staticmethod
+    def check_year_combination(year, loc):
+        if year < 1985 and loc in [(52.5, 5.5), (52.0, 5.5), (51.5, 5.5)]:
+            return False
+        return True
+
     def get_locations(self, log_training=False):
         if log_training:
             locations = list(set(self.test_locations + self.train_locations))
@@ -557,6 +563,8 @@ class EvalCallback(BaseCallback):
             years_bar = tqdm(self.get_years(log_training))
             for iy, year in enumerate(years_bar, 1):
                 for il, test_location in enumerate(self.get_locations(log_training), 1):
+                    if not self.check_year_combination(year, test_location):
+                        continue
                     years_bar.set_description(f'Evaluating {year}, {str(test_location): <{10}} | '
                                               f'{str(il+(len(self.get_locations(log_training))*iy)): <{3}}/{total_eval}')
                     env_pcse_evaluation.env_method('overwrite_year', year)

@@ -361,10 +361,10 @@ if __name__ == '__main__':
     # random weather
     # TODO tidy up
     if args.random_weather:
-        train_locations = (52.0, 5.5)
-        test_locations = (52.0, 5.5)
+        train_locations = [(52.57, 5.63), (52.5, 5.5)]
+        test_locations = (52.57, 5.63)
         train_years = [*range(4000, 5999)]
-        test_years = [*range(1990, 2022)]
+        test_years = [*range(1983, 1985)]
 
     else:
         # define training and testing years
