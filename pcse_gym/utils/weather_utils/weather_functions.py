@@ -98,6 +98,63 @@ YEAR MONTH DAY	MIN MAX RAIN RAD
     file.write(site_file)
 
 
+def convert_pcse_file_to_lars_wg(filename: str, site_name: str = None, co2: float = 400.0,):
+    wdp = None
+    if '.xls' in filename:
+        wdp = pcse.input.ExcelWeatherDataProvider(os.path.join('origin_csv', filename))
+    if '.csv' in filename:
+        wdp = pcse.input.CSVWeatherDataProvider(os.path.join('origin_csv', filename))
+    else:
+        Exception(f"file {filename} not CSV or XLSX")
+
+    date_range = generate_date_list(wdp.first_date, wdp.last_date)
+
+    try:
+        tmin = pd.Series([wdp(x).TMIN for x in date_range])
+    except pcse.exceptions.WeatherDataProviderError:
+        if wdp.missing > 1:
+            miss = wdp.missing_days[-1]
+            date_range = generate_date_list(wdp.first_date, miss - datetime.timedelta(days=1))
+            tmin = pd.Series([wdp(x).TMIN for x in date_range])
+        else:
+            date_range = generate_date_list(wdp.first_date, wdp.missing_days[0] - datetime.timedelta(days=1))
+            tmin = pd.Series([wdp(x).TMIN for x in date_range])
+
+    tmax = pd.Series([wdp(x).TMAX for x in date_range])
+    rain = pd.Series([wdp(x).RAIN * 10 for x in date_range])  # cm to mm
+    irrad = pd.Series([wdp(x).IRRAD / 1000000 for x in date_range])  # J to MJ
+
+    y = pd.Series([x.year for x in date_range])
+    m = pd.Series([x.month for x in date_range])
+    d = pd.Series([x.day for x in date_range])
+
+    weather_dict = pd.concat([y, m, d, tmin, tmax, rain, irrad], axis=1)
+
+    weather_dict.to_csv(os.path.join('data_larswg', f'{wdp.latitude:.2f}-{wdp.longitude:.2f}.dat'),
+                        sep='\t',
+                        header=False,
+                        index=False)
+
+    # don't change format below!
+    site_file = f'''[SITE]
+{f'{wdp.latitude}-{wdp.longitude}' if site_name is None else site_name}
+[LAT, LON and ALT]
+{wdp.latitude:.2f}	{wdp.longitude:.2f}	 {wdp.elevation}
+[CO2]
+{co2}
+[WEATHER FILES]
+{f'{wdp.latitude:.2f}-{wdp.longitude:.2f}.dat'}
+[FORMAT]
+YEAR MONTH DAY	MIN MAX RAIN RAD
+[END]
+    '''
+
+    file = open(os.path.join('data_larswg',
+                             f"{f'{wdp.latitude:.2f}-{wdp.longitude:.2f}'}.st"),
+                'w')
+    file.write(site_file)
+
+
 def convert_year(wg_df: pd.DataFrame, base_year=3000):
 
     formatted_year = []
@@ -148,6 +205,7 @@ def convert_date_nasa(np_df: pd.DataFrame):
     np_df.DAY = series
 
     return np_df
+
 
 def convert_leap_year(wg_df: pd.DataFrame):
     """
@@ -249,8 +307,13 @@ def larswg_to_pcse_csv(site_file: str, fill_missing=False):
 
     assert os.path.isfile(os.path.join("output_larswg", f'{dat_file}.dat'))
 
-    lat = site_file.split('-')[0]
-    lon = site_file.split('-')[1][:-5]
+    with open(os.path.join("output_larswg", f"{site_file}"), 'r') as f:
+        st_file = f.read()
+        lines = st_file.split('\n')[3]
+        line = [splits for splits in lines.split("\t") if splits]
+
+    lat = line[0]
+    lon = line[1]
 
     filename = f'{lat}-{lon}_random_weather'
 
@@ -467,7 +530,8 @@ def r_squared(y, y_hat):
 if __name__ == '__main__':
     # nasapower_to_larswg((52.5, 5.5),
     #                     "52.5-5.5")
-    larswg_to_pcse_csv('52.5-5.5WG.st')
+    larswg_to_pcse_csv('PAGVWG.st')
+    # convert_pcse_csv_to_lars_wg('pagv_weather.xlsx')
     # nasapower_to_larswg((52.0, 5.5), co2=344.85)
     # evaluate_wind_vap_derivation()
     # histogram_check()
