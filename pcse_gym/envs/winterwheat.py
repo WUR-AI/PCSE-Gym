@@ -348,7 +348,8 @@ class WinterWheat(gym.Env):
         # N concentration in rain for deposition
         nh4concr, no3concr = convert_year_to_n_concentration(self.sb3_env.agmt.crop_end_date.year,
                                                              agmt=self.sb3_env.agmt,
-                                                             random_weather=self.random_weather, )
+                                                             random_weather=self.random_weather,
+                                                             loc=self.loc)
 
         site_parameters = {'NH4ConcR': nh4concr, 'NO3ConcR': no3concr, }
         return site_parameters
