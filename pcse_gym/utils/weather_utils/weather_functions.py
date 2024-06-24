@@ -101,9 +101,9 @@ YEAR MONTH DAY	MIN MAX RAIN RAD
 def convert_pcse_file_to_lars_wg(filename: str, site_name: str = None, co2: float = 400.0,):
     wdp = None
     if '.xls' in filename:
-        wdp = pcse.input.ExcelWeatherDataProvider(os.path.join('origin_csv', filename))
+        wdp = pcse.input.ExcelWeatherDataProvider(os.path.join('weather_csv', filename))
     if '.csv' in filename:
-        wdp = pcse.input.CSVWeatherDataProvider(os.path.join('origin_csv', filename))
+        wdp = pcse.input.CSVWeatherDataProvider(os.path.join('weather_csv', filename))
     else:
         Exception(f"file {filename} not CSV or XLSX")
 
@@ -318,7 +318,10 @@ def larswg_to_pcse_csv(site_file: str, fill_missing=False):
     filename = f'{lat}-{lon}_random_weather'
 
     # load nasa power to fill in
-    wdp = pcse.input.NASAPowerWeatherDataProvider(float(lat), float(lon))
+    if float(lat) % 0.5 != 0:
+        wdp = pcse.input.ExcelWeatherDataProvider(os.path.join('weather_csv', f'{lat}-{lon}.xlsx'))
+    else:
+        wdp = pcse.input.NASAPowerWeatherDataProvider(float(lat), float(lon))
 
     with open(os.path.join("output_larswg", f"{dat_file}.dat"), 'r') as f:
         wg_df = pd.read_csv(f, sep='\t', names=['year', 'doy', 'TMIN', 'TMAX', 'RAIN', 'IRRAD'], index_col=False)
@@ -348,8 +351,8 @@ def larswg_to_pcse_csv(site_file: str, fill_missing=False):
     wg_df.RAIN = wg_df.RAIN  # * 10  # cm to mm
 
     # create NASA power df
-    date_range = generate_date_list(datetime.date(1984,1,1),
-                                    datetime.date(2022, 12, 31))
+    date_range = generate_date_list(wdp.first_date,
+                                    wdp.last_date)
     tmin = pd.Series([wdp(x).TMIN for x in date_range])
     tmax = pd.Series([wdp(x).TMAX for x in date_range])
     rain = pd.Series([wdp(x).RAIN * 10 for x in date_range])  # cm to mm
