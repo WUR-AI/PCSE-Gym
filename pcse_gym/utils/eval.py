@@ -655,26 +655,26 @@ class EvalCallback(BaseCallback):
             results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
 
             # pickle info for creating figures
-            dir = self.logger.get_dir()
-            with open(os.path.join(dir, f'infos_{self.num_timesteps}.pkl'), 'wb') as f:
+            dir_log = self.logger.get_dir()
+            with open(os.path.join(dir_log, f'infos_{self.num_timesteps}.pkl'), 'wb') as f:
                 pickle.dump(results_figure, f)
 
             # if using comet, log pickle file and model as asset
             if self.comet_experiment:
                 # need to check if always true
                 model_num = self.num_timesteps / self.n_envs if self.multiprocess else self.num_timesteps
-                list_dir = os.listdir(dir)
+                list_dir = os.listdir(dir_log)
                 model_files = [(file, int(file.split('-')[1].split('.')[0])) for file in list_dir if file.startswith('model-') and file.endswith("zip")]
                 max_model_file = max(model_files, key=lambda x: x[1])
                 latest_model_step = max_model_file[1]
-                self.comet_experiment.log_asset(file_data=os.path.join(dir, f'infos_{self.num_timesteps}.pkl'),
+                self.comet_experiment.log_asset(file_data=os.path.join(dir_log, f'infos_{self.num_timesteps}.pkl'),
                                                 step=self.num_timesteps,
                                                 file_name=f'infos_{self.num_timesteps}')
-                self.comet_experiment.log_asset(file_data=os.path.join(dir, f'env-{latest_model_step}.pkl'),
+                self.comet_experiment.log_asset(file_data=os.path.join(dir_log, f'env-{latest_model_step}.pkl'),
                                                 step=self.num_timesteps,
                                                 file_name=f'env-{latest_model_step}')
                 self.comet_experiment.log_model(self.comet_experiment.get_name(),
-                                                os.path.join(dir, f'model-{latest_model_step}.zip'),
+                                                os.path.join(dir_log, f'model-{latest_model_step}.zip'),
                                                 file_name=f'model_{latest_model_step}')
 
             # create variable plot
