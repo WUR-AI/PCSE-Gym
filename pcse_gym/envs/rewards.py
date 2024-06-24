@@ -233,7 +233,7 @@ class Rewards:
             obj.calculate_amount(amount)
             obj.calculate_cost_cumulative(amount)
             obj.calculate_positive_reward_cumulative(output, output_baseline, multiplier)
-            reward = 0  # - amount * self.costs_nitrogen
+            reward = 0 - self.costs_nitrogen if amount > 0 else 0
             growth = process_pcse.compute_growth_storage_organ(output, self.timestep, multiplier)
 
             return reward, growth
