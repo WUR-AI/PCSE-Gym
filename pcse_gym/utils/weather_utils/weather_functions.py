@@ -47,7 +47,7 @@ def nasapower_to_larswg(coordinates: tuple,
 
     Files are saved under pcse_gym/utils/weather_utils/data_larswg/
     """
-    wdp = pcse.db.NASAPowerWeatherDataProvider(*coordinates)
+    wdp = pcse.input.NASAPowerWeatherDataProvider(*coordinates)
 
     if first_date and last_date is not None:
         date_range = generate_date_list(first_date, last_date)
@@ -255,7 +255,7 @@ def larswg_to_pcse_csv(site_file: str, fill_missing=False):
     filename = f'{lat}-{lon}_random_weather'
 
     # load nasa power to fill in
-    wdp = pcse.db.NASAPowerWeatherDataProvider(float(lat), float(lon))
+    wdp = pcse.input.NASAPowerWeatherDataProvider(float(lat), float(lon))
 
     with open(os.path.join("output_larswg", f"{dat_file}.dat"), 'r') as f:
         wg_df = pd.read_csv(f, sep='\t', names=['year', 'doy', 'TMIN', 'TMAX', 'RAIN', 'IRRAD'], index_col=False)
@@ -465,7 +465,9 @@ def r_squared(y, y_hat):
 
 
 if __name__ == '__main__':
-    larswg_to_pcse_csv('52.0-5.5WG.st')
+    # nasapower_to_larswg((52.5, 5.5),
+    #                     "52.5-5.5")
+    larswg_to_pcse_csv('52.5-5.5WG.st')
     # nasapower_to_larswg((52.0, 5.5), co2=344.85)
     # evaluate_wind_vap_derivation()
     # histogram_check()
