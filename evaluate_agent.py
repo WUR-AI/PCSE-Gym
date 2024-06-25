@@ -3,15 +3,13 @@ import argparse
 import pickle
 from statistics import mean
 
+import numpy as np
 import gymnasium as gym
 import lib_programname
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from datetime import datetime
-
-from stable_baselines3 import PPO
-from sb3_contrib import RecurrentPPO
+import datetime
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -19,6 +17,7 @@ from pcse_gym.envs.winterwheat import WinterWheat, WinterWheatRay
 from pcse_gym.envs.sb3 import get_model_kwargs
 import pcse_gym.utils.defaults as defaults
 import pcse_gym.utils.eval as eval
+from pcse_gym.utils.nitrogen_helpers import get_standard_practices
 from pcse_gym.envs.constraints import ActionConstrainer
 
 path_to_program = lib_programname.get_path_executed_script()
@@ -144,12 +143,46 @@ def evaluate_policy(policy, env, n_eval_episodes=1, framework='sb3'):
     return episode_rewards, episode_infos
 
 
+def evaluate_treatment(policy, env, n_eval_episodes=1):
+    episode_rewards, episode_infos = [], []
+    for i in range(n_eval_episodes):
+        episode_length = 0
+        episode_reward = 0
+        terminated, truncated, prev_action, prev_reward, info = False, False, None, None, None
+        infos_this_episode = []
+        fert_dates, fert_amounts = get_standard_practices(policy, env.sb3_env.agmt.get_end_date.year)
+
+        while not terminated or truncated:
+            date = env.date
+            action = 0
+            for amount, fert_date in enumerate(fert_dates):
+                if fert_date < date <= fert_date + datetime.timedelta(7):
+                    action = fert_amounts[amount] / 10
+                    print(f"fertilized {action} at {fert_date}")
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            episode_reward += reward
+            episode_length += 1
+            infos_this_episode.append(info)
+        variables = infos_this_episode[0].keys()
+        episode_info = {}
+        for v in variables:
+            episode_info[v] = {}
+        for v in variables:
+            for info_dict in infos_this_episode:
+                episode_info[v].update(info_dict[v])
+        episode_rewards.append(episode_reward)
+        episode_infos.append(episode_info)
+    return episode_rewards, episode_infos
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", type=str)
     parser.add_argument("--step", type=int, default=250000)
     parser.add_argument("-c", "--costs_nitrogen", type=float, default=10.0, help="Costs for nitrogen")
-    parser.add_argument("-a", "--agent", type=str, default="PPO", help="RL agent. PPO, RPPO, DQN")
+    parser.add_argument("-a", "--agent", type=str, default="PPO", help="RL agent or other policies. PPO,"
+                                                                       "RPPO, DQN, standard-practise, or Treatments")
     parser.add_argument("-e", "--environment", type=int, default=2)
     parser.add_argument("-r", "--reward", type=str, default="DEF", help="Reward function. DEF, DEP, GRO, or ANE")
     parser.add_argument("-b", "--n_budget", type=int, default=0, help="Nitrogen budget. kg/ha")
@@ -171,21 +204,14 @@ if __name__ == "__main__":
     framework_path = "WOFOST_experiments"
     if not args.measure and args.noisy_measure:
         parser.error("noisy measure should be used with measure")
-    if args.agent not in ['PPO', 'RPPO', 'DQN', 'GRU', 'PosMLP', 'S4D', 'IndRNN', 'DiffNC', 'ATM']:
-        parser.error("Invalid agent argument. Please choose PPO, RPPO, GRU, IndRNN, DiffNC, PosMLP, ATM, DQN")
-    if args.reward == 'DEP':
-        args.vrr = True
-    if args.agent in ['GRU', 'PosMLP', 'S4D', 'IndRNN', 'DiffNC']:
-        args.framework = 'rllib'
-        framework_path = "rllib/PPO"
-    elif args.agent in ['ATM']:
-        args.framework = 'ACNO-MDP'
     pcse_model_name = "LINTUL" if not args.environment else "WOFOST"
     pcse_model = args.environment
 
     if args.location == "NL":
         """The Netherlands"""
         eval_locations = [(52, 5.5)]#, (51.5, 5), (52.5, 6.0)]
+    elif args.location == "PAGV":
+        eval_locations = [(52.57, 5.63)]
     elif args.location == "LT":
         """Lithuania"""
         eval_locations = [(55.0, 23.5), (55.0, 24.0), (55.5, 23.5)]
@@ -198,7 +224,10 @@ if __name__ == "__main__":
             eval_year = args.year
     else:
         # eval_year = [year for year in [*range(1990, 2024)] if year % 2 == 0]
-        eval_year = [*range(1990, 2024)]
+        if args.location in ["NL", 'LT']:
+            eval_year = [*range(1990, 2024)]
+        elif args.location == "PAGV":
+            eval_year = [*range(1983, 1985)]
     crop_features = defaults.get_default_crop_features(pcse_env=args.environment, minimal=False)
     weather_features = defaults.get_default_weather_features()
     action_features = defaults.get_default_action_features()
@@ -226,17 +255,22 @@ if __name__ == "__main__":
         a_shape = [7] + [m_shape] * len(po_features)
         action_spaces = gym.spaces.MultiDiscrete(a_shape)
 
-    checkpoint_folder = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)
-    model_file_to_load = os.listdir(checkpoint_folder)
-    model_zip_name = [a for a in model_file_to_load if a.endswith(".zip")][0]
-    env_pkl_name = [a for a in model_file_to_load if a.endswith(".pkl")][0]
+    if os.path.isdir(os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)):
+        checkpoint_folder = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)
+    else:
+        os.mkdir(os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path))
+        checkpoint_folder = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)
 
-    checkpoint_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
-                                   model_zip_name)
-    stats_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
-                              env_pkl_name)
+    if args.agent in ['PPO', 'RPPO']:
+        model_file_to_load = os.listdir(checkpoint_folder)
+        model_zip_name = [a for a in model_file_to_load if a.endswith(".zip")][0]
+        env_pkl_name = [a for a in model_file_to_load if a.endswith(".pkl")][0]
+        checkpoint_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
+                                       model_zip_name)
+        stats_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
+                                  env_pkl_name)
 
-    agent = None
+    agent = args.agent
     if args.framework == 'rllib':
         raise NotImplementedError
         import ray
@@ -250,7 +284,7 @@ if __name__ == "__main__":
     if args.framework == 'sb3':
         from stable_baselines3 import PPO
         from sb3_contrib import RecurrentPPO
-        from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv, sync_envs_normalization
+        from stable_baselines3.common.vec_env import VecEnv, VecNormalize, DummyVecEnv, sync_envs_normalization
         from stable_baselines3.common.monitor import Monitor
 
         nitrogen_levels = 9  # 0 - 80 kg/ha
@@ -262,15 +296,16 @@ if __name__ == "__main__":
                              pcse_env=args.environment,
                              nitrogen_levels=nitrogen_levels,
                              **kwargs)
-        env = ActionConstrainer(env, action_limit=args.action_limit, n_budget=args.n_budget)
-        env = DummyVecEnv([lambda: env])
-        env = VecNormalize.load(stats_path, env)
         cust_objects = {"lr_schedule": lambda x: 0.0001, "clip_range": lambda x: 0.4,
                         "action_space": action_spaces}
-        if args.agent == 'RPPO':
-            agent = RecurrentPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
-        elif args.agent == 'PPO':
-            agent = PPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
+        if args.agent in ['PPO', 'RPPO']:
+            env = ActionConstrainer(env, action_limit=args.action_limit, n_budget=args.n_budget)
+            env = DummyVecEnv([lambda: env])
+            env = VecNormalize.load(stats_path, env)
+            if args.agent == 'RPPO':
+                agent = RecurrentPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
+            elif args.agent == 'PPO':
+                agent = PPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
         policy = agent
 
     evaluate_dir = os.path.join(evaluate_dir, args.checkpoint_path)
@@ -286,11 +321,17 @@ if __name__ == "__main__":
             years_bar.set_description(f'Evaluating {year}, {str(test_location): <{10}} | '
                                       f'{str(il + (len(eval_locations) * iy)): <{3}}/{total_eval}')
             if args.framework == 'sb3':
-                env.env_method('overwrite_year', year)
-                env.env_method('overwrite_location', test_location)
-                env.reset()
-                sync_envs_normalization(agent.get_env(), env)
-                episode_rewards, episode_infos = eval.evaluate_policy(policy=policy, env=env)
+                if isinstance(agent, PPO) or isinstance(agent, RecurrentPPO):
+                    env.env_method('overwrite_year', year)
+                    env.env_method('overwrite_location', test_location)
+                    env.reset()
+                    sync_envs_normalization(agent.get_env(), env)
+                    episode_rewards, episode_infos = eval.evaluate_policy(policy=policy, env=env)
+                else:
+                    env.overwrite_year(year)
+                    env.overwrite_location(test_location)
+                    env.reset()
+                    episode_rewards, episode_infos = evaluate_treatment(policy=policy, env=env)
             elif args.framework == 'rllib':
                 env.overwrite_year(year)
                 env.overwrite_location(test_location)
@@ -302,8 +343,9 @@ if __name__ == "__main__":
             profit[my_key] = list(episode_infos[0]['profit'].values())[-1]
             NUE[my_key] = list(episode_infos[0]['NUE'].values())[-1]
             if args.framework == 'sb3':
-                if env.unwrapped.envs[0].unwrapped.po_features:
-                    episode_infos = eval.get_measure_graphs(episode_infos)
+                if isinstance(env, VecEnv):
+                    if env.unwrapped.envs[0].unwrapped.po_features:
+                        episode_infos = eval.get_measure_graphs(episode_infos)
             elif args.framework == 'rllib':
                 if env.po_features:
                     episode_infos = eval.get_measure_graphs(episode_infos)
@@ -343,10 +385,12 @@ if __name__ == "__main__":
                      'fertilizer', 'val', 'IDWST', 'prob_measure',
                      'NLOSSCUM', 'WC', 'Ndemand', 'NAVAIL', 'NuptakeTotal',
                      'SM', 'TAGP', 'LAI', 'NO3', 'NH4']
-        if env.unwrapped.envs[0].unwrapped.po_features: variables.append('measure')
+        if isinstance(env, VecEnv):
+            if env.unwrapped.envs[0].unwrapped.po_features: variables.append('measure')
     else:
         variables = ['action', 'WSO', 'reward', 'TNSOIL', 'val']
-        if env.unwrapped.envs[0].unwrapped.po_features: variables.append('measure')
+        if isinstance(env, VecEnv):
+            if env.unwrapped.envs[0].unwrapped.po_features: variables.append('measure')
 
     if 'measure' in variables:
         variables.remove('measure')

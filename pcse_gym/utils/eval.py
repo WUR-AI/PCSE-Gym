@@ -297,7 +297,7 @@ def evaluate_policy(
             if policy in ['standard-practice', 'standard-practise']:
                 date = env.get_attr("date")[0]
                 for fert_date in fert_dates:
-                    if date > fert_date and date <= fert_date + datetime.timedelta(7):
+                    if fert_date < date <= fert_date + datetime.timedelta(7):
                         action = [amount * 3]
             if policy == 'no-nitrogen':
                 action = [0]

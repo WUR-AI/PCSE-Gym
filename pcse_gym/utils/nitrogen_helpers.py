@@ -202,3 +202,57 @@ def get_surplus_n(n_input, n_so, year=None, start=None, end=None, n_seed=3.5):
     n_i = input_nue(n_input, year=year, start=start, end=end, n_seed=n_seed)
 
     return n_i - n_so
+
+
+def treatments_list():
+    return ['N1-PA', 'N2-PA', 'N3-PA',
+            'N1-DE', 'N2-DE', 'N3-DE',
+            'N1-DB', 'N2-DB', 'N3-DB',
+            'N1-WA', 'N2-WA', 'N3-WA']
+
+
+def treatment_dates(treatment: str, year: int):
+    assert treatment in treatments_list()
+
+    fert_dates = []
+    if '-PA' in treatment:
+        fert_dates = [datetime.date(year, 2, 17), datetime.date(year, 5, 11), datetime.date(year, 6, 21)]
+    elif '-DE' in treatment:
+        fert_dates = [datetime.date(year, 2, 17), datetime.date(year, 5, 14), datetime.date(year, 6, 8)]
+    elif '-DB' in treatment:
+        fert_dates = [datetime.date(year, 2, 17), datetime.date(year, 5, 9), datetime.date(year, 6, 6)]
+    elif '-WA' in treatment:
+        fert_dates = [datetime.date(year, 3, 12), datetime.date(year, 4, 10), datetime.date(year, 4, 22), datetime.date(year, 5, 26)]
+
+    return fert_dates
+
+
+def treatment_amounts(treatment: str):
+    assert treatment in treatments_list()
+    amounts = []
+    if '-PA' in treatment:
+        if 'N1' in treatment:
+            amounts = [80, 0, 0]
+        elif 'N2' in treatment:
+            amounts = [80, 60, 40]
+        else:
+            amounts = [80, 120, 40]
+    elif '-DB' in treatment:
+        if 'N1' in treatment:
+            amounts = [70, 0, 0]
+        elif 'N2' in treatment:
+            amounts = [70, 60, 40]
+        else:
+            amounts = [70, 120, 40]
+    elif '-DE' in treatment:
+        if 'N1' in treatment:
+            amounts = [50, 60, 0]
+        elif 'N2' in treatment:
+            amounts = [50, 60, 40]
+        else:
+            amounts = [50, 60, 40]
+    return amounts
+
+
+def get_standard_practices(treatment: str, year: int):
+    return treatment_dates(treatment, year), treatment_amounts(treatment)
