@@ -114,8 +114,8 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
     if agent == 'RPPO':
-        hyperparams = {'batch_size': 64, 'n_steps': 2048, 'learning_rate': 0.0001, 'ent_coef': 0.0,
-                       'clip_range': 0.4,
+        hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 0.0,
+                       'clip_range': 0.2,
                        'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.4,
                        'policy_kwargs': {},
                        }
@@ -362,9 +362,9 @@ if __name__ == '__main__':
     # TODO tidy up
     if args.random_weather:
         train_locations = [(52.57, 5.63), (52.5, 5.5)]
-        test_locations = (52.57, 5.63)
+        test_locations = [(52.57, 5.63)]
         train_years = [*range(4000, 5999)]
-        test_years = [*range(1983, 1985)]
+        test_years = [*range(1983, 2016)]
 
     else:
         # define training and testing years
