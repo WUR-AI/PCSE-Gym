@@ -251,6 +251,13 @@ def treatment_amounts(treatment: str):
             amounts = [50, 60, 40]
         else:
             amounts = [50, 60, 40]
+    elif '-WA' in treatment:
+        if 'N1' in treatment:
+            amounts = [110, 0, 0, 40]
+        elif 'N2' in treatment:
+            amounts = [110, 0, 60, 40]
+        else:
+            amounts = [110, 80, 60, 40]
     return amounts
 
 
