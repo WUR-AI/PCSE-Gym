@@ -2,7 +2,7 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 
-from pcse_gym.utils.nitrogen_helpers import input_nue
+from pcse_gym.utils.nitrogen_helpers import input_nue, get_surplus_n
 import pcse_gym.utils.process_pcse_output as process_pcse
 
 
@@ -473,17 +473,48 @@ class Rewards:
             self.timestep = timestep
             self.costs_nitrogen = costs_nitrogen
 
-        def calculate_reward_nue(self, n_input, n_output, year=None, start=None, end=None):
+        def calculate_reward_nue(self, n_fertilized, n_output, year=None, start=None, end=None):
+            nue = calculate_nue(n_fertilized, n_output, year=year, start=start, end=end)
+            n_surplus = get_surplus_n(n_fertilized, n_output, year=year, start=start, end=end)
+            end_yield = super().dump_cumulative_positive_reward
+
+            return self.nue_condition(nue) * self.n_surplus_condition(n_surplus, self.nue_condition(nue)) * end_yield
+
+        def calculate_reward_nue_simple(self, n_input, n_output, year=None, start=None, end=None):
             nue = calculate_nue(n_input, n_output, year=year, start=start, end=end)
             end_yield = super().dump_cumulative_positive_reward
 
-            return unimodal_function(nue) * end_yield
+            return self.nue_condition(nue) * end_yield
 
         def calculate_reward_nue_dense(self, n_input, n_output, pcse_output, year=None, start=None, end=None):
             nue = calculate_nue(n_input, n_output, year=year, start=start, end=end)
             yield_t = process_pcse.compute_growth_storage_organ(pcse_output, self.timestep)
 
-            return unimodal_function(nue) * yield_t
+            return self.nue_condition(nue) * yield_t
+
+        #  piecewise conditions
+        @staticmethod
+        def nue_condition(b):
+            """
+            For NUE reward, coefficient indicating how close the NUE in the range of lower_bound-upper_bound
+            """
+            lower_bound = 0.7
+            upper_bound = 0.85
+            if b < lower_bound:
+                return upper_bound * np.exp(-10 * (lower_bound - b)) + 0.1
+            elif lower_bound <= b <= upper_bound:
+                return 1
+            else:  # b > upper_bound
+                return upper_bound * np.exp(-10 * (b - upper_bound)) + 0.1
+
+        @staticmethod
+        def n_surplus_condition(b, c):
+            if b <= 80 and c == 1:
+                return 2
+            elif b <= 80 and c != 1:
+                return 1
+            else:
+                return 0.5
 
         def reset(self):
             super().reset()
@@ -547,21 +578,6 @@ def calculate_nue(n_input, n_so, year=None, start=None, end=None, n_seed=3.5):
     n_in = input_nue(n_input, year, n_seed=n_seed, start=start, end=end)
     nue = n_so / n_in
     return nue
-
-
-#  piecewise conditions
-def unimodal_function(b):
-    """
-    For NUE reward, coefficient indicating how close the NUE in the range of lower_bound-upper_bound%
-    """
-    lower_bound = 0.7
-    upper_bound = 0.8
-    if b < lower_bound:
-        return upper_bound * np.exp(-10 * (lower_bound - b)) + 0.1
-    elif lower_bound <= b <= upper_bound:
-        return 1
-    else:  # b > upper_bound
-        return upper_bound * np.exp(-10 * (b - upper_bound)) + 0.1
 
 
 def compute_economic_reward(wso, fertilizer, price_yield_ton=400.0, price_fertilizer_ton=300.0):

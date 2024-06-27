@@ -279,6 +279,13 @@ class WinterWheat(gym.Env):
             year=self.date.year,
             start=self.sb3_env.agmt.get_start_date,
             end=self.sb3_env.agmt.get_end_date)
+        if 'Nsurplus' not in info.keys():
+            info['Nsurplus'] = {}
+        info['Nsurplus'][self.date] = get_surplus_n(self.reward_container.get_total_fertilization * 10,
+                                                    n_so=process_pcse.get_n_storage_organ(output),
+                                                    year=self.date.year,
+                                                    start=self.sb3_env.agmt.get_start_date,
+                                                    end=self.sb3_env.agmt.get_end_date)
 
         if terminated and self.reward_function in reward_functions_end():
             reward = self.reward_container.dump_cumulative_positive_reward - abs(reward)
@@ -288,19 +295,12 @@ class WinterWheat(gym.Env):
 
         elif terminated and self.reward_function in ['NUE', 'DNE']:
             reward = (self.reward_container.calculate_reward_nue(
-                n_input=self.reward_container.get_total_fertilization * 10,
+                n_fertilized=self.reward_container.get_total_fertilization * 10,
                 n_output=process_pcse.get_n_storage_organ(output),
                 year=self.date.year,
                 start=self.sb3_env.agmt.get_start_date,
                 end=self.sb3_env.agmt.get_end_date)
             )
-            if 'Nsurplus' not in info.keys():
-                info['Nsurplus'] = {}
-            info['Nsurplus'][self.date] = get_surplus_n(self.reward_container.get_total_fertilization,
-                                                        n_so=process_pcse.get_n_storage_organ(output),
-                                                        year=self.date.year,
-                                                        start=self.sb3_env.agmt.get_start_date,
-                                                        end=self.sb3_env.agmt.get_end_date)
 
         if 'profit' not in info.keys():
             info['profit'] = {}
