@@ -159,7 +159,6 @@ def replace_years_(agro_management, years):  # deprecated
     return updated_agro_management
 
 
-@functools.cache
 def get_weather_data_provider(location,
                               random_weather=False) -> pcse.input.NASAPowerWeatherDataProvider or pcse.fileinput.CSVWeatherDataProvider:
     if random_weather:
@@ -168,10 +167,20 @@ def get_weather_data_provider(location,
         if location[0] % 0.5 != 0 or location[1] % 0.5 != 0:
             base_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
             weather_file_dir = os.path.join(base_dir, 'utils', 'weather_utils', 'weather_csv')
-            wdp = pcse.input.ExcelWeatherDataProvider(os.path.join(weather_file_dir, f'{location[0]}-{location[1]}.xlsx'))
+            wdp = get_excel_provider(weather_file_dir, location)
         else:
-            wdp = pcse.input.NASAPowerWeatherDataProvider(*location)
+            wdp = get_nasapower_provider(location)
     return wdp
+
+
+@functools.cache
+def get_excel_provider(file_dir: str, location):
+    return pcse.input.ExcelWeatherDataProvider(os.path.join(file_dir, f'{location[0]}-{location[1]}.xlsx'))
+
+
+@functools.cache
+def get_nasapower_provider(location):
+    return pcse.input.NASAPowerWeatherDataProvider(*location)
 
 
 @functools.cache
