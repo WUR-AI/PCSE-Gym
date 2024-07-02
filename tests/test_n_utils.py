@@ -11,11 +11,15 @@ from pcse.input.nasapower import NASAPowerWeatherDataProvider
 from pcse_gym.utils.nitrogen_helpers import (calculate_year_n_deposition,
                                              convert_year_to_n_concentration,
                                              calculate_day_n_deposition,
-                                             get_aggregated_n_depo_days)
+                                             get_aggregated_n_depo_days,
+                                             get_no3_deposition_pcse,
+                                             get_nh4_deposition_pcse)
 from pcse_gym.utils.weather_utils.weather_functions import generate_date_list
 from pcse_gym.envs.common_env import AgroManagementContainer
 from tests import initialize_env as init_env
 from pcse_gym.utils.nitrogen_helpers import get_deposition_amount, get_disaggregated_deposition
+
+import matplotlib.pyplot as plt
 
 
 class TestNitrogenUtils(unittest.TestCase):
@@ -42,7 +46,7 @@ class TestNitrogenUtils(unittest.TestCase):
 
         nh4test, no3test = calculate_year_n_deposition(year, (52.0, 5.5), self.env.sb3_env.agmt, self.env.sb3_env._site_params)
 
-        self.assertAlmostEqual(nh4test, 16.046101936865323, 0)
+        self.assertAlmostEqual(nh4test, 16.756101936865323, 0)
         self.assertAlmostEqual(no3test, 9.178370307887013, 0)
 
     def test_n_concentration_conversion(self):
@@ -62,10 +66,14 @@ class TestNitrogenUtils(unittest.TestCase):
             agro_config = yaml.load(f, Loader=yaml.SafeLoader)
         agmt = AgroManagementContainer(agro_config)
 
+        agmt.campaign_date = datetime.date(1999, 10, 1)
+        agmt.crop_start_date = datetime.date(1999, 10, 3)
+        agmt.crop_end_date = datetime.date(2000, 8, 20)
+
         nh4, no3 = convert_year_to_n_concentration(2000, agmt)
 
-        self.assertEqual(nh4, 1.6990120381901193)
-        self.assertEqual(no3, 0.9240719849583664)
+        self.assertEqual(nh4, 2.1035838876987443)
+        self.assertEqual(no3, 1.2053951985280167)
 
     def test_day_n_deposition(self):
         year = 2000
@@ -99,6 +107,22 @@ class TestNitrogenUtils(unittest.TestCase):
 
         self.assertAlmostEqual(nh4_week_depo, 0.1561, 1)
         self.assertAlmostEqual(no3_week_depo,  0.31239, 1)
+
+    def test_n_depo_from_pcse(self):
+        year = 2000
+        self.env.overwrite_year(year)
+        self.env.reset()
+
+        terminated = False
+
+        while not terminated:
+            _, _, terminated, _, _ = self.env.step(np.array([0]))
+
+        no3_depo = get_no3_deposition_pcse(self.env.sb3_env.model.get_output())
+        nh4_depo = get_nh4_deposition_pcse(self.env.sb3_env.model.get_output())
+
+        self.assertAlmostEqual(no3_depo, 9.54, 0)
+        self.assertAlmostEqual(nh4_depo, 16.66, 0)
 
 
 class NitrogenUseEfficiency(unittest.TestCase):

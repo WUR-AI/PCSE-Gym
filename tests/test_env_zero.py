@@ -9,6 +9,7 @@ class ZeroEnv(unittest.TestCase):
         self.years = [*range(1990, 2022)]
         self.env_sow = init_env.initialize_env(reward="DEF", start_type='sowing')
         self.env_emerge = init_env.initialize_env(reward="DEF", start_type='emergence')
+        self.random_init = init_env.initialize_env(reward="DEF", start_type='sowing', random_init=True)
 
     @staticmethod
     def run_steps(env, year, terminated):
@@ -52,4 +53,3 @@ class ZeroEnv(unittest.TestCase):
         wso_baseline = self.env_sow.baseline_env.model.get_output()[-1:][0]['WSO']
         print(wso_rl, wso_baseline)
         self.assertNotEqual(wso_rl, wso_baseline)
-
