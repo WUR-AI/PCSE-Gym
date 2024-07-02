@@ -2,7 +2,7 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 
-from pcse_gym.utils.nitrogen_helpers import input_nue, get_surplus_n
+from pcse_gym.utils.nitrogen_helpers import input_nue, get_surplus_n, get_n_deposition_pcse, get_nh4_deposition_pcse, get_no3_deposition_pcse
 import pcse_gym.utils.process_pcse_output as process_pcse
 
 
@@ -117,8 +117,8 @@ class Rewards:
     def update_profit(self, output, amount, year, multiplier, country='NL'):
         self.profit += self.calculate_profit(output, amount, year, multiplier, with_year=self.with_year)
 
-    def calculate_nue_on_terminate(self, n_input, n_so, year, start=None, end=None, country='NL'):
-        return calculate_nue(n_input, n_so, year=year, start=start, end=end)
+    def calculate_nue_on_terminate(self, n_input, n_so, year, start=None, end=None, no3_depo=None, nh4_depo=None):
+        return calculate_nue(n_input, n_so, year=year, start=start, end=end, no3_depo=no3_depo, nh4_depo=nh4_depo)
 
     """
     Classes that determine the reward function
@@ -473,9 +473,13 @@ class Rewards:
             self.timestep = timestep
             self.costs_nitrogen = costs_nitrogen
 
-        def calculate_reward_nue(self, n_fertilized, n_output, year=None, start=None, end=None):
-            nue = calculate_nue(n_fertilized, n_output, year=year, start=start, end=end)
-            n_surplus = get_surplus_n(n_fertilized, n_output, year=year, start=start, end=end)
+        def calculate_reward_nue(self, n_fertilized, n_output, year=None, start=None, end=None, no3_depo=None, nh4_depo=None):
+            if year is None or start is None or end is None:
+                nue = calculate_nue(n_fertilized, n_output, no3_depo=no3_depo, nh4_depo=nh4_depo)
+                n_surplus = get_surplus_n(n_fertilized, n_output, no3_depo=no3_depo, nh4_depo=nh4_depo)
+            else:
+                nue = calculate_nue(n_fertilized, n_output, year=year, start=start, end=end)
+                n_surplus = get_surplus_n(n_fertilized, n_output, year=year, start=start, end=end)
             end_yield = super().dump_cumulative_positive_reward
 
             return self.nue_condition(nue) * self.n_surplus_condition(n_surplus, self.nue_condition(nue)) * end_yield
@@ -494,12 +498,10 @@ class Rewards:
 
         #  piecewise conditions
         @staticmethod
-        def nue_condition(b):
+        def nue_condition(b, lower_bound=0.7, upper_bound=0.85):
             """
             For NUE reward, coefficient indicating how close the NUE in the range of lower_bound-upper_bound
             """
-            lower_bound = 0.7
-            upper_bound = 0.85
             if b < lower_bound:
                 return upper_bound * np.exp(-10 * (lower_bound - b)) + 0.1
             elif lower_bound <= b <= upper_bound:
@@ -509,12 +511,10 @@ class Rewards:
 
         @staticmethod
         def n_surplus_condition(b, c):
-            if b <= 80 and c == 1:
+            if 0 < b <= 80 and c == 1:
                 return 2
-            elif b <= 80 and c != 1:
-                return 1
             else:
-                return 0.5
+                return 1
 
         def reset(self):
             super().reset()
@@ -574,8 +574,8 @@ class ActionsContainer:
         return self.actions
 
 
-def calculate_nue(n_input, n_so, year=None, start=None, end=None, n_seed=3.5):
-    n_in = input_nue(n_input, year, n_seed=n_seed, start=start, end=end)
+def calculate_nue(n_input, n_so, year=None, start=None, end=None, n_seed=3.5, no3_depo=None, nh4_depo=None):
+    n_in = input_nue(n_input, year=year, n_seed=n_seed, start=start, end=end, no3_depo=no3_depo, nh4_depo=nh4_depo)
     nue = n_so / n_in
     return nue
 

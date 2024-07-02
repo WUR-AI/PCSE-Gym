@@ -15,7 +15,7 @@ import pcse_gym.envs.common_env as common_env
 import pcse_gym.utils.defaults as defaults
 import pcse_gym.utils.process_pcse_output as process_pcse
 from .rewards import Rewards
-from pcse_gym.utils.nitrogen_helpers import get_aggregated_n_depo_days
+from pcse_gym.utils.nitrogen_helpers import get_aggregated_n_depo_days, m2_to_ha
 
 
 def to_weather_info(days, weather_data, weather_variables):
@@ -222,12 +222,10 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
             nvars = len(self.crop_features) + len(self.weather_features) * self.timestep
         if self.mask_binary:
             nvars = nvars + len(self.po_features)
-        if self.pcse_env == 2:
-            nvars = nvars + 2  # NH4_depo and NO3_depo
         return gym.spaces.Box(-10, np.inf, shape=(nvars,))
 
     def _apply_action(self, action):
-        action = action * self.action_multiplier
+        # action = action * self.action_multiplier
         action = action * 10  # kg N / ha
         return action
 
@@ -306,16 +304,18 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
                         obs[i] = sum(observation['crop_model'][feature][-1])
                     elif feature in ['SM', 'WC'] and self.pcse_env == 1:
                         obs[i] = observation['crop_model'][feature][-1]
+                    elif feature in ['RNO3DEPOSTT', 'RNH4DEPOSTT', 'NO3', 'NH4']:
+                        obs[i] = observation['crop_model'][feature][-1] / m2_to_ha
                     else:
                         obs[i] = observation['crop_model'][feature][-1][0]
                 else:
                     obs[i] = observation['crop_model'][feature][-1]
-        if self.pcse_env == 2:
-            list_rain = [observation['weather']['RAIN'][d] for d in range(self.timestep)]
-            n_depos = get_aggregated_n_depo_days(self.timestep, list_rain, self._site_params)
-            for i, n_depo in enumerate(n_depos):
-                j = len(self.crop_features) + i
-                obs[j] = n_depo
+        # if self.pcse_env == 2:
+        #     list_rain = [observation['weather']['RAIN'][d] for d in range(self.timestep)]
+        #     n_depos = get_aggregated_n_depo_days(self.timestep, list_rain, self._site_params)
+        #     for i, n_depo in enumerate(n_depos):
+        #         j = len(self.crop_features) + i
+        #         obs[j] = n_depo
 
         if not self.no_weather:
             # for i, feature in enumerate(self.action_features):
