@@ -366,9 +366,26 @@ def larswg_to_pcse_csv(site_file: str, fill_missing=False):
     np_df.insert(7, 'SNOWDEPTH', ['NaN' for _ in np_df.TMIN], True)
     np_df = convert_date_nasa(np_df)
 
+    # add missing dates in between
+    wdp = pcse.input.NASAPowerWeatherDataProvider(float(lat), float(lon))
+    date_range = generate_date_list(datetime.date(1986, 1, 1),
+                                    wdp.last_date)
+    tmin = pd.Series([wdp(x).TMIN for x in date_range])
+    tmax = pd.Series([wdp(x).TMAX for x in date_range])
+    rain = pd.Series([wdp(x).RAIN * 10 for x in date_range])  # cm to mm
+    irrad = pd.Series([wdp(x).IRRAD / 1000 for x in date_range])  # J to kJ
+    vap = pd.Series([wdp(x).VAP / 10 for x in date_range])  # hPA to kPa
+    wind = pd.Series([wdp(x).WIND for x in date_range])  # hPA to kPa
+    day = pd.Series([wdp(x).DAY for x in date_range])
+
+    np_df_add = pd.concat([day, irrad, tmin, tmax, vap, wind, rain], axis=1,
+                      keys=['DAY', 'IRRAD', 'TMIN', 'TMAX', 'VAP', 'WIND', 'RAIN'])
+    np_df_add.insert(7, 'SNOWDEPTH', ['NaN' for _ in np_df_add.TMIN], True)
+    np_df_add = convert_date_nasa(np_df_add)
+
     # insert nasa power df on top of wg df
-    wg_df.index = [x + len(np_df.index) for x in wg_df.index]
-    wg_df = pd.concat([np_df, wg_df])
+    wg_df.index = [x + len(np_df_add.index) for x in wg_df.index]
+    wg_df = pd.concat([np_df, np_df_add, wg_df])
 
     # get header for csv
     header = get_csv_header('NL', lon=float(lon), lat=float(lat), elev=15.29)
