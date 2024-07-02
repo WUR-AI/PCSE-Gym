@@ -182,14 +182,32 @@ def get_disaggregated_deposition(year, start_date, end_date):
     return nh4_dis, no3_dis
 
 
+def get_nh4_deposition_pcse(output):
+    return output[-1]['RNH4DEPOSTT'] / m2_to_ha
+
+
+def get_no3_deposition_pcse(output):
+    return output[-1]['RNO3DEPOSTT'] / m2_to_ha
+
+
+def get_n_deposition_pcse(output):
+    return (get_no3_deposition_pcse(output) + get_nh4_deposition_pcse(output)) / m2_to_ha
+
+
 def get_days_in_year(year):
     return 365 + calendar.isleap(year)
 
 
-def input_nue(n_input, year=None, start=None, end=None, n_seed=3.5):
-    if start is None or end is None:
+def input_nue(n_input, year=None, start=None, end=None, n_seed=3.5, no3_depo=None, nh4_depo=None):
+    if (start is None or end is None) and (no3_depo is None or nh4_depo is None):
+        """ Use NL statistics """
         nh4, no3 = get_deposition_amount(year)
+    elif (start is None or end is None) and (no3_depo is not None or nh4_depo is not None):
+        """ Use output from PCSE """
+        nh4, no3 = nh4_depo, no3_depo
     else:
+        """ Use NL statistics with disaggregation"""
+        assert year is not None
         if year < 2500:
             nh4, no3 = get_disaggregated_deposition(year=year, start_date=start, end_date=end)
         else:
@@ -198,8 +216,8 @@ def input_nue(n_input, year=None, start=None, end=None, n_seed=3.5):
     return n_input + n_seed + n_depo
 
 
-def get_surplus_n(n_input, n_so, year=None, start=None, end=None, n_seed=3.5):
-    n_i = input_nue(n_input, year=year, start=start, end=end, n_seed=n_seed)
+def get_surplus_n(n_input, n_so, year=None, start=None, end=None, n_seed=3.5, no3_depo=None, nh4_depo=None):
+    n_i = input_nue(n_input, year=year, start=start, end=end, n_seed=n_seed, no3_depo=no3_depo, nh4_depo=nh4_depo)
 
     return n_i - n_so
 

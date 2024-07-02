@@ -1,10 +1,13 @@
 import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
 import pandas as pd
 from collections import defaultdict
 
+
 def get_cumulative_variables():
     return ['fertilizer', 'reward']
+
 
 def get_ylim_dict(n=32):
     def def_value():
@@ -33,6 +36,7 @@ def get_ylim_dict(n=32):
     ylim['prob_SM'] = [0, 1.0]
     ylim['prob_measure'] = [0, 1.0]
     return ylim
+
 
 def get_titles():
     def def_value(): return ("", "")
@@ -82,12 +86,16 @@ def get_titles():
     return_dict["TMAX"] = ("Maximum temperature", "°C")
     return_dict["IRRAD"] = ("Incoming global radiation", "J/m2/day")
     return_dict["RAIN"] = ("Daily rainfall", "cm/day")
+    return_dict["NO3"] = ("Nitrate Levels (NO3)", "kgN/ha")
+    return_dict["NH4"] = ("Ammonium Levels (NH4)", "kgN/ha")
+    return_dict["NLOSSCUM"] = ("Cumulative N loss", "kgN/ha")
 
     return return_dict
 
 
-def plot_year_loc_heatmap(results_dict, variable, year_locs, cumulative_variables=get_cumulative_variables(), ax=None, fig=None, ylim=None,
-                  put_legend=True):
+def plot_year_loc_heatmap(results_dict, variable, year_locs, cumulative_variables=get_cumulative_variables(), ax=None,
+                          fig=None, ylim=None,
+                          put_legend=True):
     titles = get_titles()
     xmax = 0
     xmin = 9999
@@ -120,7 +128,7 @@ def plot_year_loc_heatmap(results_dict, variable, year_locs, cumulative_variable
         dataframes_list = dataframes_list.T
 
         left, right, down, up = dataframes_list.columns[0], dataframes_list.columns[-1], 0, len(dataframes_list.index)
-        extent = [left-6, right+6, down-0.5, up-0.5]
+        extent = [left - 6, right + 6, down - 0.5, up - 0.5]
 
         # plot heatmap
         heatmap = ax.imshow(dataframes_list, aspect='auto', cmap='RdYlBu', extent=extent, origin='lower')
@@ -143,8 +151,6 @@ def plot_year_loc_heatmap(results_dict, variable, year_locs, cumulative_variable
         ax.axhline(y=0, color='lightgrey', zorder=1)
         ax.margins(x=0)
 
-
-
     from matplotlib.ticker import FixedLocator
     ax.xaxis.set_minor_locator(FixedLocator(range(0, xmax, 7)))
     ax.xaxis.grid(True, which='minor')
@@ -166,6 +172,7 @@ def plot_year_loc_heatmap(results_dict, variable, year_locs, cumulative_variable
 
     return ax
 
+
 def restructure_x(day_nums):
     # sanity check
     # if number resets to 1, add subsequent number with previous so on
@@ -176,6 +183,7 @@ def restructure_x(day_nums):
             offset += day_nums[i - 1]
         new_num.append(n + offset)
     return new_num
+
 
 def month_of_year_ind(day_of_year):
     month_lengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] * 2
@@ -189,6 +197,7 @@ def month_of_year_ind(day_of_year):
             return i
     else:
         return None
+
 
 def ticks_checker(inc_flag, _xmin, xmax):
     mons = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
@@ -206,6 +215,7 @@ def ticks_checker(inc_flag, _xmin, xmax):
         mons = mons[0:_extra_month + 1]
     return mons, mon_days
 
+
 def doy_generator():
     # sanity check
     # starts in Oct (274), resets in Jan (1), continue with offset for rest
@@ -219,6 +229,7 @@ def doy_generator():
             offset = last_value
             current_value += offset
         yield current_value
+
 
 def plot_variable(results_dict, variable='reward', cumulative_variables=get_cumulative_variables(), ax=None, ylim=None,
                   put_legend=True, plot_average=False, pcse_env=2, plot_heatmap=False):
@@ -344,8 +355,7 @@ def plot_var_vs_freq(results_dict, variable='measure_LAI', ax=None, ylim=None,
 
 
 def plot_var_vs_freq_box(results_dict, variable='measure_LAI', ax=None, ylim=None,
-                  put_legend=True, n_year_loc=32):
-
+                         put_legend=True, n_year_loc=32):
     titles = get_titles()
 
     dataframes_list = []
@@ -357,7 +367,7 @@ def plot_var_vs_freq_box(results_dict, variable='measure_LAI', ax=None, ylim=Non
     plot_measure = pd.concat(dataframes_list, axis=1)
     plot_measure = plot_measure.sum(axis=1)
 
-    variable = variable.replace("measure_","")
+    variable = variable.replace("measure_", "")
 
     dataframes_list = []
     for label, results in results_dict.items():
@@ -368,10 +378,10 @@ def plot_var_vs_freq_box(results_dict, variable='measure_LAI', ax=None, ylim=Non
     plot_var = pd.concat(dataframes_list, axis=1)
 
     plot_df = pd.concat([plot_measure, plot_var], axis=1)
-   # plot_df.dropna(inplace=True)
-    plot_df = plot_df.rename(columns={0:'measure'})
+    # plot_df.dropna(inplace=True)
+    plot_df = plot_df.rename(columns={0: 'measure'})
 
-    col1_values = range(int(max(plot_df['measure']))+1)
+    col1_values = range(int(max(plot_df['measure'])) + 1)
 
     # Initialize a dictionary to hold boxplot data
     boxplot_data = {i: [] for i in col1_values}
@@ -404,12 +414,13 @@ def plot_var_vs_freq_box(results_dict, variable='measure_LAI', ax=None, ylim=Non
 
     return ax
 
-def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
 
+def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
     if variable.startswith('measure_'):
         variable_type = 'm'
     else:
         variable_type = 'p'
+
     # Function to find the nearest weekly date
     def nearest_weekly_date(date, base_date):
         days_difference = (date - base_date).days
@@ -426,7 +437,7 @@ def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
     plot_measure = plot_measure.sum(axis=1)
 
     if variable_type == 'm':
-        variable = variable.replace("measure_","")
+        variable = variable.replace("measure_", "")
     else:
         variable = variable.replace("prob_", "")
 
@@ -441,7 +452,7 @@ def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
 
     plot_df = pd.concat([plot_var, plot_measure], axis=1)
     plot_df.dropna(inplace=True)
-    plot_df = plot_df.rename(columns={0:'variance', 1: 'measure'})
+    plot_df = plot_df.rename(columns={0: 'variance', 1: 'measure'})
 
     plot_df['Date'] = plot_df.index
 
@@ -457,13 +468,14 @@ def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
     result.index = result.index.map(lambda d: d.strftime('%m-%d'))
     result = result.sort_values(by=['variance'])
 
-    result['variance'] = (result['variance'] - result['variance'].min()) / (result['variance'].max() - result['variance'].min())
+    result['variance'] = (result['variance'] - result['variance'].min()) / (
+            result['variance'].max() - result['variance'].min())
 
     ax.scatter(result['variance'], result['measure'], edgecolor='black', alpha=0.7)
 
     titles = get_titles()
 
-    ax.set_xticks(np.arange(min(result['variance']), max(result['variance'])+0.1, 0.1))
+    ax.set_xticks(np.arange(min(result['variance']), max(result['variance']) + 0.1, 0.1))
 
     # ax.set_xticklabels(range(0, int(max(result['variance']))), rotation=315, fontsize=8)
 
@@ -482,3 +494,37 @@ def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
 
     return ax
 
+
+def plot_nue_template(show_graph_labels=False, max=400) -> plt:
+    l = max
+
+    n_in = np.linspace(0, l, l)
+
+    # For NUE = 50%, the output is the same as the input
+    n_output_50 = n_in * 0.5
+
+    # For NUE = 90%, the output is 90% of the input
+    n_output_90 = n_in * 0.9
+
+    # Desired minimum productivity (N output > 80 kg/ha/yr)
+    min_productivity_output = np.full(n_in.shape, 80)
+    max_surplus_line = n_in - 80
+    max_surplus_line[max_surplus_line < 0] = 0
+
+    plt.figure(figsize=(14, 10))
+    plt.plot(n_in, n_output_50, 'k-', label='NUE = 50%' if show_graph_labels else '')
+    plt.plot(n_in, n_output_90, 'k-', label='NUE = 90%' if show_graph_labels else '')
+    plt.plot(n_in, min_productivity_output, 'k-.',
+             label='Desired minimum productivity (N output > 80 kg/ha/yr)' if show_graph_labels else '')
+    plt.plot(n_in, max_surplus_line, 'k:', label='Desired maximum N surplus < 80 kg/ha/yr' if show_graph_labels else '')
+
+    plt.fill_between(n_in, 0, n_output_50, color='red', alpha=0.3, label='NUE very low (NUE < 50%): Risk of '
+                                                                         'inefficient N use' if show_graph_labels else '')
+
+    plt.fill_between(n_in, n_output_90, l, color='orange', alpha=0.3, label='NUE very high (NUE > 90%): Risk of soil '
+                                                                            'mining' if show_graph_labels else '')
+
+    plt.fill_between(n_in, n_output_50, max_surplus_line, color='yellow', alpha=0.5,
+                     label='Desired maximum surplus (N input - N output)' if show_graph_labels else '')
+
+    return plt
