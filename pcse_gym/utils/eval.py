@@ -5,9 +5,11 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import time
 from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize_scalar, minimize, dual_annealing
+from pyswarm import pso
 from bisect import bisect_left
 from typing import Union
 from statistics import mean, median
@@ -23,6 +25,7 @@ from sb3_contrib.common.recurrent.type_aliases import RNNStates
 from sb3_contrib import RecurrentPPO
 import pcse_gym.utils.defaults as defaults
 from pcse_gym.utils.process_pcse_output import get_dict_lintul_wofost
+from pcse_gym.utils.nitrogen_helpers import get_surplus_n
 from pcse_gym.envs.rewards import calculate_nue
 from .plotter import plot_variable, plot_var_vs_freq_scatter, get_ylim_dict
 
@@ -330,6 +333,7 @@ class FindOptimum():
         self.env = env
         if train_years is None:
             self.train_years = [env.get_attr("date")[0].year]
+        self.current_rewards = None
 
     def start_dump(self, x):
         def def_value():
@@ -357,12 +361,85 @@ class FindOptimum():
             returnvalue = returnvalue - reward
         return returnvalue
 
+    def weekly_dumps(self, year, schedule, num_weeks):
+        self.env.overwrite_year(year)
+        self.env.reset()
+        terminated = False
+        total_reward = 0.0
+        week = 0
+        while not terminated:
+            action = 0
+            if week < num_weeks:
+                x = schedule[week]
+                action = x / 10
+            _, reward, terminated, _, _ = self.env.step(action)
+            total_reward += reward
+            week += 1
+        return total_reward
+
     def optimize_start_dump(self, bounds=(0, 100.0)):
         res = minimize_scalar(self.start_dump, bounds=bounds, method='bounded')
         print(f'optimum found for {self.train_years} at {res.x} {-1.0 * res.fun}')
         for year, reward in self.current_rewards.items():
             print(f'- {year} {reward}')
         return res.x
+
+    def optimize_weekly_dump(self, num_weeks=45, bounds=(0.0, 100.0), eval_year=None):
+        def objective(fertilization_schedule):
+            # Sanity check
+            # Negative of the reward because we are minimizing
+
+            total_reward = 0
+            for year in self.train_years:
+                total_reward += self.weekly_dumps(year, fertilization_schedule, num_weeks)
+            return -total_reward  # We want to minimize the reward so negative value
+
+        # Start with lowest and make list as long as weeks
+        initial_guess = np.full(num_weeks, bounds[0])
+        bounds = [bounds] * num_weeks
+
+        print(f"Start Optimizing episode for year {eval_year}!")
+
+        start_time = time.time()
+        res = dual_annealing(objective, bounds, x0=initial_guess)
+        # res = minimize(objective, initial_guess, bounds=bounds, method='L-BFGS-B')
+        end_time = time.time()
+
+        print(f"Time taken for optimization: {end_time - start_time} s")
+
+        print(f'Optimum found for {self.train_years} with fertilization schedule {res.x} yielding {-res.fun}')
+        return res.x
+
+
+    def swarm_optimize_weekly_dump(self, num_weeks=31, bounds=(0.0, 100.0), epsilon=1e-6):
+        def objective(fertilization_schedule):
+            # Sanity check
+            # Negative of the reward because we are minimizing
+            # Ensure most of the schedule is zero and only 3 values are non-zero
+            # non_zero_weeks = np.count_nonzero(fertilization_schedule[:num_weeks] > epsilon)
+            # if non_zero_weeks > 4:
+            #     return float('inf')  # Penalize invalid schedules
+
+            total_reward = 0
+            for year in self.train_years:
+                total_reward += self.weekly_dumps(year, fertilization_schedule, num_weeks)
+            return -total_reward  # We want to minimize the reward so negative value
+
+        # Set bounds for each week
+        lb = [bounds[0]] * num_weeks  # Lower bounds
+        ub = [bounds[1]] * num_weeks  # Upper bounds set to epsilon for zero-bound weeks
+        # for i in range(num_weeks):
+        #     lb[i] = bounds[0]
+        #     ub[i] = bounds[1]
+
+        start_time = time.time()
+        optimal_schedule, optimal_reward = pso(objective, lb, ub, swarmsize=10000, maxiter=2000000)
+        end_time = time.time()
+
+        print(f"Time taken for optimization: {end_time - start_time} s")
+
+        print(f'Optimum found for {self.train_years} with fertilization schedule {optimal_schedule} yielding {-optimal_reward}')
+        return optimal_schedule
 
 
 def get_measure_graphs(episode_infos):
@@ -448,7 +525,7 @@ class EvalCallback(BaseCallback):
         if log_training and not self.random_weather:
             years = list(set(self.test_years + self.train_years))
         elif log_training and self.random_weather:
-            years = list(set(self.test_years + list(np.random.choice(self.train_years, 32))))
+            years = list(set(self.test_years + list(np.random.choice(self.train_years, 16))))
         else:
             years = list(set(self.test_years))
         return years
@@ -473,6 +550,12 @@ class EvalCallback(BaseCallback):
         n_in = np.cumsum(list(episode_infos[0]['fertilizer'].values()))[-1]
         n_year = list(episode_infos[0]['NamountSO'].keys())[-1].year
         return calculate_nue(n_input=n_in, n_so=n_so, year=n_year)
+
+    def get_nsurplus(self, episode_infos):
+        n_so = list(episode_infos[0]['NamountSO'].values())[-1]
+        n_in = np.cumsum(list(episode_infos[0]['fertilizer'].values()))[-1]
+        n_year = list(episode_infos[0]['NamountSO'].keys())[-1].year
+        return get_surplus_n(n_input=n_in, n_so=n_so, year=n_year)
 
     def _on_step(self):
         train_year = self.model.get_env().get_attr("date")[0].year
@@ -545,9 +628,11 @@ class EvalCallback(BaseCallback):
             ax.set_xticklabels(list(self.histogram_training_locations.keys()), fontdict=None, minor=False)
             self.logger.record(f'figures/training-locations', Figure(fig, close=True))
 
-            reward, fertilizer, result_model, WSO, NUE, profit, init_no3, init_nh4 = {}, {}, {}, {}, {}, {}, {}, {}
+            reward, fertilizer, result_model, WSO, NUE, Nsurplus, profit, init_no3, init_nh4 = (
+                {}, {}, {}, {}, {}, {}, {}, {}, {})
             log_training = self.get_do_log_training()
 
+            print("evaluating environment with learned policy...")
             env_pcse_evaluation = self.env_eval
             # if env_pcse_evaluation.normalize:
             #     env_pcse_evaluation = DummyVecEnv([lambda: env_pcse_evaluation])
@@ -559,13 +644,12 @@ class EvalCallback(BaseCallback):
             n_year_loc = 0
 
             total_eval = len(self.get_years(log_training)*len(self.get_locations(log_training)))
-            print("evaluating environment with learned policy...")
             years_bar = tqdm(self.get_years(log_training))
             for iy, year in enumerate(years_bar, 1):
                 for il, test_location in enumerate(self.get_locations(log_training), 1):
                     if not self.check_year_combination(year, test_location):
                         continue
-                    years_bar.set_description(f'Evaluating {year}, {str(test_location): <{10}} | '
+                    years_bar.set_description(f'Evaluating {year}, {str(test_location): <{11}} | '
                                               f'{str(il+(len(self.get_locations(log_training))*iy)): <{3}}/{total_eval}')
                     env_pcse_evaluation.env_method('overwrite_year', year)
                     env_pcse_evaluation.env_method('overwrite_location', test_location)
@@ -582,6 +666,7 @@ class EvalCallback(BaseCallback):
                     WSO[my_key] = list(episode_infos[0]['WSO'].values())[-1]
                     profit[my_key] = list(episode_infos[0]['profit'].values())[-1]
                     NUE[my_key] = self.get_nue(episode_infos)
+                    Nsurplus[my_key] = self.get_nsurplus(episode_infos)
                     # if self.env_eval.envs[0].unwrapped.random_init:
                         # init_no3[my_key] = episode_infos[0]['init_n']['no3']
                         # init_nh4[my_key] = episode_infos[0]['init_n']['nh4']
@@ -594,11 +679,13 @@ class EvalCallback(BaseCallback):
                 avg_nue = mean([x for x in NUE.values()])
                 avg_profit = mean([x for x in profit.values()])
                 avg_wso = mean([x for x in WSO.values()])
+                avg_nsurplus = mean([x for x in Nsurplus.values()])
                 print(f'Evaluation step {self.num_timesteps}\n'
                       f'Avg. reward: {avg_rew:.4f}\n'
                       f'Avg. profit: {avg_profit:.4f}\n'
                       f'Avg. NUE: {avg_nue:.4f}\n'
-                      f'Avg. WSO: {avg_wso:.4f}\n')
+                      f'Avg. WSO: {avg_wso:.4f}\n'
+                      f'Avg. Nsurplus: {avg_nsurplus:.4f}\n')
 
             for test_location in list(set(self.test_locations)):
                 test_keys = [(a, test_location) for a in self.test_years]
@@ -607,6 +694,8 @@ class EvalCallback(BaseCallback):
                 self.logger.record(f'eval/reward-average-test-{test_location}', compute_average(reward, test_keys))
                 self.logger.record(f'eval/nitrogen-average-test-{test_location}',
                                    compute_average(fertilizer, test_keys))
+                self.logger.record(f'eval/n-surplus-average-test-{test_location}',
+                                   compute_average(Nsurplus, test_keys))
                 self.logger.record(f'eval/profit-average-test-{test_location}',
                                    compute_average(profit, test_keys))
                 self.logger.record(f'eval/WSO-average-test-{test_location}', compute_average(WSO, test_keys))
@@ -614,17 +703,21 @@ class EvalCallback(BaseCallback):
                 self.logger.record(f'eval/nitrogen-median-test-{test_location}', compute_median(fertilizer, test_keys))
                 self.logger.record(f'eval/WSO-median-test-{test_location}', compute_median(WSO, test_keys))
                 self.logger.record(f'eval/profit-median-test-{test_location}', compute_median(profit, test_keys))
+                self.logger.record(f'eval/n-surplus-median-test-{test_location}',
+                                   compute_median(Nsurplus, test_keys))
 
             if log_training:
                 train_keys = [(a, b) for a in self.train_years for b in self.train_locations]
                 self.logger.record(f'eval/reward-average-train', compute_average(reward, train_keys))
                 self.logger.record(f'eval/nitrogen-average-train', compute_average(fertilizer, train_keys))
                 self.logger.record(f'eval/NUE-average-train', compute_average(NUE, train_keys))
+                self.logger.record(f'eval/n-surplus-average-train', compute_average(Nsurplus, train_keys))
                 self.logger.record(f'eval/NUE-median-train', compute_median(NUE, train_keys))
                 self.logger.record(f'eval/profit-average-train', compute_average(profit, train_keys))
                 self.logger.record(f'eval/reward-median-train', compute_median(reward, train_keys))
                 self.logger.record(f'eval/nitrogen-median-train', compute_median(fertilizer, train_keys))
                 self.logger.record(f'eval/profit-median-train', compute_median(profit, train_keys))
+                self.logger.record(f'eval/n-surplus-median-train', compute_median(Nsurplus, train_keys))
 
             self.logger.record(f'eval/NUE-median-all', compute_median(NUE))
             self.logger.record(f'eval/NUE-average-all', compute_average(NUE))

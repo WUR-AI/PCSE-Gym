@@ -7,6 +7,7 @@ import numpy as np
 import gymnasium as gym
 import lib_programname
 import matplotlib.pyplot as plt
+import pandas as pd
 from tqdm import tqdm
 
 import datetime
@@ -17,7 +18,7 @@ from pcse_gym.envs.winterwheat import WinterWheat, WinterWheatRay
 from pcse_gym.envs.sb3 import get_model_kwargs
 import pcse_gym.utils.defaults as defaults
 import pcse_gym.utils.eval as eval
-from pcse_gym.utils.nitrogen_helpers import get_standard_practices
+from pcse_gym.utils.nitrogen_helpers import get_standard_practices, treatments_list
 from pcse_gym.envs.constraints import ActionConstrainer
 
 path_to_program = lib_programname.get_path_executed_script()
@@ -176,6 +177,43 @@ def evaluate_treatment(policy, env, n_eval_episodes=1):
     return episode_rewards, episode_infos
 
 
+def get_ceres_policy(location, year):
+    with open(os.path.join(rootdir, "ceres_results", f"{location[0]}-{location[1]}.csv"), "r") as file:
+        df_ceres = pd.read_csv(file, header=0)
+    return list(df_ceres[str(year)])
+
+
+def evaluate_ceres(env, n_eval_episodes=1):
+    episode_rewards, episode_infos = [], []
+    for i in range(n_eval_episodes):
+        episode_reward = 0
+        terminated, truncated, prev_action, prev_reward, info = False, False, None, None, None
+        infos_this_episode = []
+        fert_amounts = get_ceres_policy(env.loc, env.sb3_env.agmt.get_end_date.year)
+        week = 0
+        while not terminated or truncated:
+            action = 0
+            if fert_amounts[week] > 0.0:
+                action = fert_amounts[week] / 10
+                print(f"fertilized {action} at week {week}")
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            episode_reward += reward
+            week += 1
+            infos_this_episode.append(info)
+
+        variables = infos_this_episode[0].keys()
+        episode_info = {}
+        for v in variables:
+            episode_info[v] = {}
+        for v in variables:
+            for info_dict in infos_this_episode:
+                episode_info[v].update(info_dict[v])
+        episode_rewards.append(episode_reward)
+        episode_infos.append(episode_info)
+    return episode_rewards, episode_infos
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", type=str)
@@ -207,27 +245,37 @@ if __name__ == "__main__":
     pcse_model_name = "LINTUL" if not args.environment else "WOFOST"
     pcse_model = args.environment
 
-    if args.location == "NL":
-        """The Netherlands"""
-        eval_locations = [(52, 5.5)]#, (51.5, 5), (52.5, 6.0)]
-    elif args.location == "PAGV":
+    if args.agent == 'ceres':
         eval_locations = [(52.57, 5.63)]
-    elif args.location == "LT":
-        """Lithuania"""
-        eval_locations = [(55.0, 23.5), (55.0, 24.0), (55.5, 23.5)]
-    else:
-        parser.error("--location arg should be either LT or NL")
-    if args.year is not None:
-        if isinstance(args.year, int):
-            eval_year = [args.year]
+        if args.year is not None:
+            if isinstance(args.year, int):
+                eval_year = [args.year]
+            else:
+                eval_year = args.year
         else:
-            eval_year = args.year
+            eval_year = [1990]
     else:
-        # eval_year = [year for year in [*range(1990, 2024)] if year % 2 == 0]
-        if args.location in ["NL", 'LT']:
-            eval_year = [*range(1990, 2024)]
+        if args.location == "NL":
+            """The Netherlands"""
+            eval_locations = [(52, 5.5)]#, (51.5, 5), (52.5, 5.5)]
         elif args.location == "PAGV":
-            eval_year = [*range(1983, 1985)]
+            eval_locations = [(52.57, 5.63)]
+        elif args.location == "LT":
+            """Lithuania"""
+            eval_locations = [(55.0, 23.5), (55.0, 24.0), (55.5, 23.5)]
+        else:
+            parser.error("--location arg should be either LT or NL")
+        if args.year is not None:
+            if isinstance(args.year, int):
+                eval_year = [args.year]
+            else:
+                eval_year = args.year
+        else:
+            # eval_year = [year for year in [*range(1990, 2024)] if year % 2 == 0]
+            if args.location in ["NL", 'LT']:
+                eval_year = [*range(1990, 2024)]
+            elif args.location == "PAGV":
+                eval_year = [*range(1983, 2022)]
     crop_features = defaults.get_default_crop_features(pcse_env=args.environment, minimal=False)
     weather_features = defaults.get_default_weather_features()
     action_features = defaults.get_default_action_features()
@@ -311,7 +359,7 @@ if __name__ == "__main__":
     evaluate_dir = os.path.join(evaluate_dir, args.checkpoint_path)
     writer = SummaryWriter(log_dir=evaluate_dir)
 
-    reward, fertilizer, result_model, WSO, NUE, profit = {}, {}, {}, {}, {}, {}
+    reward, fertilizer, result_model, WSO, NUE, profit, Nsurplus, Nloss = {}, {}, {}, {}, {}, {}, {}, {}
 
     total_eval = len(eval_year) * len(eval_locations)
     print("evaluating environment with learned policy...")
@@ -327,6 +375,11 @@ if __name__ == "__main__":
                     env.reset()
                     sync_envs_normalization(agent.get_env(), env)
                     episode_rewards, episode_infos = eval.evaluate_policy(policy=policy, env=env)
+                elif args.agent == 'ceres':
+                    env.overwrite_year(year)
+                    env.overwrite_location(test_location)
+                    env.reset()
+                    episode_rewards, episode_infos = evaluate_ceres(env=env)
                 else:
                     env.overwrite_year(year)
                     env.overwrite_location(test_location)
@@ -338,10 +391,12 @@ if __name__ == "__main__":
                 env.reset()
                 episode_rewards, episode_infos = evaluate_policy(policy=policy, env=env, framework=args.framework)
             my_key = (year, test_location)
-            reward[my_key] = episode_rewards[0].item()
+            reward[my_key] = episode_rewards[0]#.item()
             WSO[my_key] = list(episode_infos[0]['WSO'].values())[-1]
             profit[my_key] = list(episode_infos[0]['profit'].values())[-1]
             NUE[my_key] = list(episode_infos[0]['NUE'].values())[-1]
+            Nsurplus[my_key] = list(episode_infos[0]['Nsurplus'].values())[-1]
+            Nloss[my_key] = list(episode_infos[0]['NLOSSCUM'].values())[-1]
             if args.framework == 'sb3':
                 if isinstance(env, VecEnv):
                     if env.unwrapped.envs[0].unwrapped.po_features:
@@ -361,10 +416,13 @@ if __name__ == "__main__":
         avg_nue = mean([x for x in NUE.values()])
         avg_profit = mean([x for x in profit.values()])
         avg_wso = mean([x for x in WSO.values()])
+        avg_nsurplus = mean([x for x in Nsurplus.values()])
         print(f'Avg. reward: {avg_rew:.4f}\n'
               f'Avg. profit: {avg_profit:.4f}\n'
               f'Avg. NUE: {avg_nue:.4f}\n'
-              f'Avg. WSO: {avg_wso:.4f}\n')
+              f'Avg. WSO: {avg_wso:.4f}\n'
+              f'Avg. Nsurplus: {avg_nsurplus:.4f}\n')
+
 
     # #measuring history
     # for year in eval_year:
@@ -402,7 +460,8 @@ if __name__ == "__main__":
     results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
 
     # pickle info for creating figures
-    with open(os.path.join(evaluate_dir, f'infos_{args.reward}.pkl'), 'wb') as f:
+    name = args.reward if args.agent not in treatments_list() else args.agent
+    with open(os.path.join(evaluate_dir, f'infos_{name}.pkl'), 'wb') as f:
         pickle.dump(results_figure, f)
 
     for i, variable in enumerate(variables):
