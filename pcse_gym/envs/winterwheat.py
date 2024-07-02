@@ -14,7 +14,7 @@ from .measure import MeasureOrNot
 from .sb3 import ZeroNitrogenEnvStorage, StableBaselinesWrapper
 from .rewards import Rewards, ActionsContainer
 from .rewards import reward_functions_with_baseline, reward_functions_end, calculate_nue
-from pcse_gym.utils.nitrogen_helpers import get_surplus_n
+from pcse_gym.utils.nitrogen_helpers import get_surplus_n, get_nh4_deposition_pcse, get_no3_deposition_pcse
 
 
 class WinterWheat(gym.Env):
@@ -190,8 +190,6 @@ class WinterWheat(gym.Env):
             nvars = len(self.crop_features) + len(self.weather_features) * self.timestep
         if self.mask_binary:  # TODO: test with weather features
             nvars = nvars + len(self.po_features)
-        if self.pcse_env == 2:
-            nvars = nvars + 2  # NH4_depo and NO3_depo
         return nvars
 
     def step(self, action):
@@ -271,21 +269,22 @@ class WinterWheat(gym.Env):
         return reward, growth
 
     def terminate_reward_signal(self, output, reward, terminated, info):
-        if 'NUE' not in info.keys():
-            info['NUE'] = {}
-        info['NUE'][self.date] = self.rewards_obj.calculate_nue_on_terminate(
-            n_input=self.reward_container.get_total_fertilization * 10,
-            n_so=process_pcse.get_n_storage_organ(output),
-            year=self.date.year,
-            start=self.sb3_env.agmt.get_start_date,
-            end=self.sb3_env.agmt.get_end_date)
-        if 'Nsurplus' not in info.keys():
-            info['Nsurplus'] = {}
-        info['Nsurplus'][self.date] = get_surplus_n(self.reward_container.get_total_fertilization * 10,
-                                                    n_so=process_pcse.get_n_storage_organ(output),
-                                                    year=self.date.year,
-                                                    start=self.sb3_env.agmt.get_start_date,
-                                                    end=self.sb3_env.agmt.get_end_date)
+        if self.pcse_env == 2:
+            if 'NUE' not in info.keys():
+                info['NUE'] = {}
+            info['NUE'][self.date] = self.rewards_obj.calculate_nue_on_terminate(
+                n_input=self.reward_container.get_total_fertilization * 10,
+                n_so=process_pcse.get_n_storage_organ(output),
+                year=self.date.year,
+                no3_depo=get_no3_deposition_pcse(output),
+                nh4_depo=get_nh4_deposition_pcse(output),)
+            if 'Nsurplus' not in info.keys():
+                info['Nsurplus'] = {}
+            info['Nsurplus'][self.date] = get_surplus_n(self.reward_container.get_total_fertilization * 10,
+                                                        n_so=process_pcse.get_n_storage_organ(output),
+                                                        year=self.date.year,
+                                                        no3_depo=get_no3_deposition_pcse(output),
+                                                        nh4_depo=get_nh4_deposition_pcse(output),)
 
         if terminated and self.reward_function in reward_functions_end():
             reward = self.reward_container.dump_cumulative_positive_reward - abs(reward)
@@ -297,9 +296,8 @@ class WinterWheat(gym.Env):
             reward = (self.reward_container.calculate_reward_nue(
                 n_fertilized=self.reward_container.get_total_fertilization * 10,
                 n_output=process_pcse.get_n_storage_organ(output),
-                year=self.date.year,
-                start=self.sb3_env.agmt.get_start_date,
-                end=self.sb3_env.agmt.get_end_date)
+                no3_depo=get_no3_deposition_pcse(output),
+                nh4_depo=get_nh4_deposition_pcse(output),)
             )
 
         if 'profit' not in info.keys():
