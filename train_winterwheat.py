@@ -2,6 +2,7 @@ import argparse
 import lib_programname
 import sys
 import os.path
+from datetime import datetime
 import time
 import json
 
@@ -72,10 +73,12 @@ def args_func(parser):
     parser.add_argument("--measure-cost-multiplier", type=int, default=1, dest='m_multiplier',
                         help="multiplier for the measuring cost")
     parser.add_argument("--measure-all", action='store_true', dest='measure_all')
+    parser.add_argument("--overfit", action='store_true', dest='overfit')
+    parser.add_argument("--year", type=int, default=None, dest='year')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
-                        multiproc=False, comet=True)
+                        multiproc=False, comet=True, overfit=False)
 
     args = parser.parse_args()
 
@@ -105,7 +108,7 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
                        'policy_kwargs': {},
                        }
         if not no_weather:
-            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features) if pcse_env != 2 else len(crop_features)+2,
+            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
                                                              n_weather_features=len(weather_features),
                                                              n_action_features=len(action_features),
                                                              n_po_features=len(po_features) if flag_po else 0,
@@ -120,7 +123,7 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
                        'policy_kwargs': {},
                        }
         if not no_weather:
-            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features) if pcse_env != 2 else len(crop_features)+2,
+            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
                                                              n_weather_features=len(weather_features),
                                                              n_action_features=len(action_features),
                                                              n_po_features=len(po_features) if flag_po else 0,
@@ -134,7 +137,7 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
                        'policy_kwargs': {},
                        }
         if not no_weather:
-            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features) if pcse_env != 2 else len(crop_features)+2,
+            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
                                                              n_weather_features=len(weather_features),
                                                              n_action_features=len(action_features))
         hyperparams['policy_kwargs']['net_arch'] = dict(pi=[256, 256], vf=[256, 256])
@@ -145,7 +148,7 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
     if agent == 'DQN':
         hyperparams = {'exploration_fraction': 0.3, 'exploration_initial_eps': 1.0,
                        'exploration_final_eps': 0.001,
-                       'policy_kwargs': get_policy_kwargs(n_crop_features=len(crop_features) if pcse_env != 2 else len(crop_features)+2,
+                       'policy_kwargs': get_policy_kwargs(n_crop_features=len(crop_features),
                                                           n_weather_features=len(weather_features),
                                                           n_action_features=len(action_features))
                        }
@@ -329,6 +332,9 @@ def train(log_dir, n_steps,
         comet_log.add_tag(cost_measure)
     tb_log_name = tb_log_name + '-run'
 
+    start_time = time.time()
+    print(f"Time started training: {start_time}")
+
     model.learn(total_timesteps=n_steps,
                 callback=EvalCallback(env_eval=env_pcse_eval, test_years=test_years,
                                       train_years=train_years, train_locations=train_locations,
@@ -336,6 +342,8 @@ def train(log_dir, n_steps,
                                       comet_experiment=comet_log, multiprocess=multiprocess, eval_freq=eval_freq,
                                       **kwargs),
                 tb_log_name=tb_log_name)
+
+    print(f'Time taken to train {tb_log_name}: {time.time() - start_time}')
 
 
 if __name__ == '__main__':
@@ -360,12 +368,20 @@ if __name__ == '__main__':
 
     # random weather
     # TODO tidy up
-    if args.random_weather:
+    if args.random_weather and not args.overfit:
         train_locations = [(52.57, 5.63), (52.5, 5.5)]
         test_locations = [(52.57, 5.63)]
         train_years = [*range(4000, 5999)]
         test_years = [*range(1983, 2016)]
-
+    elif args.random_weather and args.overfit:
+        train_locations = [(52.57, 5.63)]
+        test_locations = [(52.57, 5.63)]
+        if args.year is not None:
+            train_years = [args.year]
+            test_years = [args.year]
+        else:
+            train_years = [1990]
+            test_years = [1990]
     else:
         # define training and testing years
         all_years = [*range(1990, 2022)]
@@ -422,6 +438,9 @@ if __name__ == '__main__':
         else:
             a_shape = [7] + [m_shape] * len(po_features)
         action_spaces = gymnasium.spaces.MultiDiscrete(a_shape)
+
+    print(f"Train and test years are {train_years} and {test_years},"
+          f"with train location of {train_locations} and test location of {test_locations}")
 
     train(log_dir, train_years=train_years, test_years=test_years,
           train_locations=train_locations,
