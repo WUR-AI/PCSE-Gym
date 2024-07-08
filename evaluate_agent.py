@@ -59,7 +59,7 @@ def initialize_env(pcse_env=1, po_features=[],
                   action_limit=action_limit, noisy_measure=noisy_measure, n_budget=n_budget, no_weather=no_weather,
                   mask_binary=mask_binary, placeholder_val=placeholder_val, normalize=normalize, loc_code=loc_code,
                   cost_measure=cost_measure, start_type=start_type, random_init=random_init, m_multiplier=m_multiplier,
-                  measure_all=measure_all, random_weather=random_weather,)
+                  measure_all=measure_all, random_weather=random_weather, )
     if framework == 'sb3':
         env_return = WinterWheat(crop_features=crop_features,
                                  costs_nitrogen=costs_nitrogen,
@@ -183,7 +183,7 @@ def get_ceres_policy(location, year):
     return list(df_ceres[str(year)])
 
 
-def evaluate_ceres(env, n_eval_episodes=1):
+def evaluate_demeter(env, n_eval_episodes=1):
     episode_rewards, episode_infos = [], []
     for i in range(n_eval_episodes):
         episode_reward = 0
@@ -214,6 +214,31 @@ def evaluate_ceres(env, n_eval_episodes=1):
     return episode_rewards, episode_infos
 
 
+def means_for_progress_bar(m: dict):
+    return mean([x for x in m.values()]) if len(m) > 1 else next(iter(m.values()))
+
+
+def low_n_init() -> dict:
+    n_dict = {'NH4I': [0.06181797, 0.33827534, 0.12490669, 0.06109704, 0.06373443, 0.09213926, 0.00802928],
+              'NO3I': [2.19391276, 0.33791361, 0.44317362, 0.08596978, 0.65234924, 0.07112439, 0.4655566], }
+    return n_dict
+
+
+def high_n_init() -> dict:
+    n_dict = {'NH4I': [3.15162898, 3.87070563, 1.37766539, 1.17044373, 1.58129878, 0.66062145, 0.18763604],
+              'NO3I': [5.42620968, 16.4380931 , 25.73569722,  9.2684839 ,  1.24005868, 2.94257558,  6.94888184], }
+    return n_dict
+
+
+def select_init_n_scenario(starting_n):
+    if starting_n == 'hi':
+        return high_n_init()
+    elif starting_n == 'low':
+        return low_n_init()
+    else:
+        return None
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", type=str)
@@ -230,11 +255,12 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--measure", action='store_true')
     parser.add_argument("--no-measure", action='store_false', dest='measure')
     parser.add_argument("-l", "--location", type=str, default="NL", help="NL or LT.")
-    parser.add_argument("-y", "--year", default=None, help="year to evaluate agent")
+    parser.add_argument("-y", "--year", type=int, default=None, help="year to evaluate agent")
     parser.add_argument("--variable-recovery-rate", action='store_true', dest='vrr')
     parser.add_argument("--noisy-measure", action='store_true', dest='noisy_measure')
     parser.add_argument("--no-weather", action='store_true', dest='no_weather')
     parser.add_argument("--random_feature", action='store_true', dest='random_feature')
+    parser.add_argument("--init-n", type=str, default=None, dest='init_n')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3', no_weather=False,
                         random_feature=False, random_weather=False)
     args = parser.parse_args()
@@ -245,7 +271,9 @@ if __name__ == "__main__":
     pcse_model_name = "LINTUL" if not args.environment else "WOFOST"
     pcse_model = args.environment
 
-    if args.agent == 'ceres':
+    init_n = args.init_n
+
+    if args.agent == 'demeter':
         eval_locations = [(52.57, 5.63)]
         if args.year is not None:
             if isinstance(args.year, int):
@@ -257,7 +285,7 @@ if __name__ == "__main__":
     else:
         if args.location == "NL":
             """The Netherlands"""
-            eval_locations = [(52, 5.5)]#, (51.5, 5), (52.5, 5.5)]
+            eval_locations = [(52, 5.5)]  #, (51.5, 5), (52.5, 5.5)]
         elif args.location == "PAGV":
             eval_locations = [(52.57, 5.63)]
         elif args.location == "LT":
@@ -351,7 +379,8 @@ if __name__ == "__main__":
             env = DummyVecEnv([lambda: env])
             env = VecNormalize.load(stats_path, env)
             if args.agent == 'RPPO':
-                agent = RecurrentPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
+                agent = RecurrentPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda',
+                                          print_system_info=True)
             elif args.agent == 'PPO':
                 agent = PPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
         policy = agent
@@ -372,18 +401,18 @@ if __name__ == "__main__":
                 if isinstance(agent, PPO) or isinstance(agent, RecurrentPPO):
                     env.env_method('overwrite_year', year)
                     env.env_method('overwrite_location', test_location)
-                    env.reset()
+                    env.env_method('reset', options=select_init_n_scenario(init_n))
                     sync_envs_normalization(agent.get_env(), env)
                     episode_rewards, episode_infos = eval.evaluate_policy(policy=policy, env=env)
-                elif args.agent == 'ceres':
+                elif args.agent == 'demeter':
                     env.overwrite_year(year)
                     env.overwrite_location(test_location)
-                    env.reset()
-                    episode_rewards, episode_infos = evaluate_ceres(env=env)
+                    env.reset(options=select_init_n_scenario(init_n))
+                    episode_rewards, episode_infos = evaluate_demeter(env=env)
                 else:
                     env.overwrite_year(year)
                     env.overwrite_location(test_location)
-                    env.reset()
+                    env.reset(options=select_init_n_scenario(init_n))
                     episode_rewards, episode_infos = evaluate_treatment(policy=policy, env=env)
             elif args.framework == 'rllib':
                 env.overwrite_year(year)
@@ -391,7 +420,7 @@ if __name__ == "__main__":
                 env.reset()
                 episode_rewards, episode_infos = evaluate_policy(policy=policy, env=env, framework=args.framework)
             my_key = (year, test_location)
-            reward[my_key] = episode_rewards[0]#.item()
+            reward[my_key] = episode_rewards[0] if isinstance(episode_rewards[0], float) else episode_rewards[0].item()
             WSO[my_key] = list(episode_infos[0]['WSO'].values())[-1]
             profit[my_key] = list(episode_infos[0]['profit'].values())[-1]
             NUE[my_key] = list(episode_infos[0]['NUE'].values())[-1]
@@ -410,19 +439,19 @@ if __name__ == "__main__":
             writer.add_scalar(f'eval/WSO-{my_key}', WSO[my_key])
             writer.add_scalar(f'eval/profit-{my_key}', profit[my_key])
             writer.add_scalar(f'eval/NUE-{my_key}', NUE[my_key])
+            writer.add_scalar(f'eval/Nsurplus-{my_key}', Nsurplus[my_key])
             result_model[my_key] = episode_infos
     else:
-        avg_rew = mean([x for x in reward.values()])
-        avg_nue = mean([x for x in NUE.values()])
-        avg_profit = mean([x for x in profit.values()])
-        avg_wso = mean([x for x in WSO.values()])
-        avg_nsurplus = mean([x for x in Nsurplus.values()])
+        avg_rew = means_for_progress_bar(reward)
+        avg_nue = means_for_progress_bar(NUE)
+        avg_profit = means_for_progress_bar(profit)
+        avg_wso = means_for_progress_bar(WSO)
+        avg_nsurplus = means_for_progress_bar(Nsurplus)
         print(f'Avg. reward: {avg_rew:.4f}\n'
               f'Avg. profit: {avg_profit:.4f}\n'
               f'Avg. NUE: {avg_nue:.4f}\n'
               f'Avg. WSO: {avg_wso:.4f}\n'
               f'Avg. Nsurplus: {avg_nsurplus:.4f}\n')
-
 
     # #measuring history
     # for year in eval_year:
@@ -460,7 +489,7 @@ if __name__ == "__main__":
     results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
 
     # pickle info for creating figures
-    name = args.reward if args.agent not in treatments_list() else args.agent
+    name = args.agent
     with open(os.path.join(evaluate_dir, f'infos_{name}.pkl'), 'wb') as f:
         pickle.dump(results_figure, f)
 

@@ -206,12 +206,6 @@ class WinterWheat(gym.Env):
         # process output to get observation, reward and growth of winterwheat
         obs, reward, growth = self.process_output(action, output, obs)
 
-        # fill in infos
-        if 'reward' not in info.keys(): info['reward'] = {}
-        info['reward'][self.date] = reward
-        if 'growth' not in info.keys(): info['growth'] = {}
-        info['growth'][self.date] = growth
-
         # used for reward functions that rely on rewards at terminate
         if self.pcse_env:
             reward, info = self.terminate_reward_signal(output, reward, terminated, info)
@@ -224,6 +218,12 @@ class WinterWheat(gym.Env):
             obs = self.norm.normalize_measure_obs(obs, measure)
             self.norm.update_running_rew(reward)
             reward = self.norm.normalize_reward(reward)
+
+        # fill in infos
+        if 'reward' not in info.keys(): info['reward'] = {}
+        info['reward'][self.date] = reward
+        if 'growth' not in info.keys(): info['growth'] = {}
+        info['growth'][self.date] = growth
 
         return obs, reward, terminated, truncated, info
 
@@ -335,7 +335,6 @@ class WinterWheat(gym.Env):
     def overwrite_initial_conditions(self):
         # N initial conditions
         list_nh4i, list_no3i = self.generate_realistic_n()
-        list_nh4i, list_no3i = list(list_nh4i), list(list_no3i)
         self.eval_nh4i = list_nh4i
         self.eval_no3i = list_no3i
 
@@ -370,8 +369,10 @@ class WinterWheat(gym.Env):
 
         '''Comments for sanity check'''
         # Generate total inorganic N from seeded normal distribution and clip so that no outliers become negative
-        total_inorganic_n = self.rng.normal(self.mean_total_N, self.std_dev_total_N)
+        # total_inorganic_n = self.rng.normal(self.mean_total_N, self.std_dev_total_N)
+        total_inorganic_n = 5
         total_inorganic_n = np.clip(total_inorganic_n, 0, 100)
+
 
         # Split total inorganic N into NO3 and NH4
         total_no3 = total_inorganic_n * self.percentage_NO3
@@ -399,8 +400,8 @@ class WinterWheat(gym.Env):
                                                                     size=1) * nh4_bottom
 
         # Ensure no negative values in the distributions, might skew the distribution by a teeny bit
-        list_nh4i = np.maximum(no3_distribution, 0)
-        list_no3i = np.maximum(nh4_distribution, 0)
+        list_nh4i = list(np.maximum(nh4_distribution, 0))
+        list_no3i = list(np.maximum(no3_distribution, 0))
 
         return list_nh4i, list_no3i
 
@@ -416,7 +417,10 @@ class WinterWheat(gym.Env):
         return site_params
 
     def reset(self, seed=None, options=None, **kwargs):
-        site_params = self.special_init_conditions()
+        if isinstance(options, dict):
+            site_params = options
+        else:
+            site_params = self.special_init_conditions()
 
         if isinstance(self.years, list):
             year = self.np_random.choice(self.years)
