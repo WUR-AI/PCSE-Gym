@@ -377,6 +377,8 @@ class PCSEEnv(gym.Env):
         self._summary_variables = model_config.SUMMARY_OUTPUT_VARS  # Summary variables are given at the end of a run
         self._weather_variables = list(pcse.base.weather.WeatherDataContainer.required)
 
+        # Define action features for observation
+        self.action_feature = self._get_action_features_space()
         # Define Gym observation space
         self.observation_space = self._get_observation_space()
         # Define Gym action space
@@ -415,6 +417,7 @@ class PCSEEnv(gym.Env):
         space = gym.spaces.Dict({
             'crop_model': self._get_observation_space_crop_model(),
             'weather': self._get_observation_space_weather(),
+            'actions': self._get_action_features_space(),
         })
         return space
 
@@ -430,6 +433,13 @@ class PCSEEnv(gym.Env):
                 'ES0': gym.spaces.Box(0, np.inf, (self._timestep,)),
                 'ET0': gym.spaces.Box(0, np.inf, (self._timestep,)),
                 'WIND': gym.spaces.Box(0, np.inf, (self._timestep,)),
+            }
+        )
+
+    def _get_action_features_space(self) -> gym.spaces.Space:
+        return gym.spaces.Dict(
+            {
+                'action_history': gym.spaces.Box(0, np.inf, (self._timestep,)),
             }
         )
 
@@ -583,10 +593,13 @@ class PCSEEnv(gym.Env):
         # Cast the weather data into a dict
         weather_observation = {var: [getattr(weather_data[d], var) for d in range(len(days))] for var in
                                self._weather_variables}
+        # Get action history through action features
+        action_features = {'action_history': [day['RNH4AMTT'] / 1e-3 + day["RNO3AMTT"] / 1e-3 for day in output]}
 
         o = {
             'crop_model': crop_model_observation,
             'weather': weather_observation,
+            'action_features': action_features,
         }
 
         return o

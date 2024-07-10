@@ -187,7 +187,7 @@ class WinterWheat(gym.Env):
         if self.sb3_env.no_weather:
             nvars = len(self.crop_features)
         else:
-            nvars = len(self.crop_features) + len(self.weather_features) * self.timestep
+            nvars = len(self.crop_features) + len(self.action_features) + len(self.weather_features) * self.timestep
         if self.mask_binary:  # TODO: test with weather features
             nvars = nvars + len(self.po_features)
         return nvars

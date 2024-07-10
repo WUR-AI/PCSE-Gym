@@ -45,9 +45,10 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     Processes input features: average pool timeseries (weather) and concat with scalars (crop features)
     """
 
-    def __init__(self, observation_space: gym.spaces.Box, n_timeseries, n_scalars, n_timesteps=7, n_po_features=5, mask_binary=False):
+    def __init__(self, observation_space: gym.spaces.Box, n_timeseries, n_scalars, n_actions, n_timesteps=7, n_po_features=5, mask_binary=False):
         self.n_timeseries = n_timeseries
         self.n_scalars = n_scalars
+        self.n_actions = n_actions
         self.n_timesteps = n_timesteps
         self.mask_binary = mask_binary
         self.n_po_features = n_po_features
@@ -55,8 +56,8 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             shape = (n_timeseries + n_scalars + n_po_features,)
             features_dim = n_timeseries + n_scalars + n_po_features
         else:
-            shape = (n_timeseries + n_scalars,)
-            features_dim = n_timeseries + n_scalars
+            shape = (n_timeseries + n_scalars + n_actions,)
+            features_dim = n_timeseries + n_scalars + n_actions
         super(CustomFeatureExtractor, self).__init__(gym.spaces.Box(-10, np.inf, shape=shape),
                                                      features_dim=features_dim)
 
@@ -67,8 +68,8 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, observations) -> th.Tensor:
         # Returns a torch tensor in a format compatible with Stable Baselines3
         batch_size = observations.shape[0]
-        scalars, timeseries = observations[:, 0:self.n_scalars], \
-                              observations[:, self.n_scalars:]
+        scalars, timeseries = observations[:, 0:self.n_scalars+self.n_actions], \
+                              observations[:, self.n_scalars+self.n_actions:]
         mask = None
         if self.mask_binary:
             mask = timeseries[:, -self.n_po_features:]
@@ -94,6 +95,7 @@ def get_policy_kwargs(n_crop_features=len(defaults.get_wofost_default_crop_featu
         features_extractor_class=CustomFeatureExtractor,
         features_extractor_kwargs=dict(n_timeseries=n_weather_features,
                                        n_scalars=n_crop_features,
+                                       n_actions=n_action_features,
                                        n_timesteps=n_timesteps,
                                        n_po_features=n_po_features,
                                        mask_binary=mask_binary),
@@ -219,10 +221,10 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         if self.no_weather:
             nvars = len(self.crop_features)
         else:
-            nvars = len(self.crop_features) + len(self.weather_features) * self.timestep
+            nvars = len(self.crop_features) + len(self.action_features) + len(self.weather_features) * self.timestep
         if self.mask_binary:
             nvars = nvars + len(self.po_features)
-        return gym.spaces.Box(-10, np.inf, shape=(nvars,))
+        return gym.spaces.Box(-np.inf, np.inf, shape=(nvars,))
 
     def _apply_action(self, action):
         # action = action * self.action_multiplier
@@ -310,20 +312,15 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
                         obs[i] = observation['crop_model'][feature][-1][0]
                 else:
                     obs[i] = observation['crop_model'][feature][-1]
-        # if self.pcse_env == 2:
-        #     list_rain = [observation['weather']['RAIN'][d] for d in range(self.timestep)]
-        #     n_depos = get_aggregated_n_depo_days(self.timestep, list_rain, self._site_params)
-        #     for i, n_depo in enumerate(n_depos):
-        #         j = len(self.crop_features) + i
-        #         obs[j] = n_depo
+
+        for i, feature in enumerate(self.action_features):
+            j = len(self.crop_features) + i
+            obs[j] = sum(observation['action_features'][feature])
 
         if not self.no_weather:
-            # for i, feature in enumerate(self.action_features):
-            #     j = len(self.crop_features) + i
-            #     obs[j] = observation['actions'][feature]
             for d in range(self.timestep):
                 for i, feature in enumerate(self.weather_features):
-                    j = d * len(self.weather_features) + len(self.crop_features) + i
+                    j = d * len(self.weather_features) + len(self.crop_features) + len(self.action_features) + i
                     obs[j] = observation['weather'][feature][d]
         return obs
 
