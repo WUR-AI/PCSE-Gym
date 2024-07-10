@@ -3,7 +3,7 @@ import lib_programname
 import sys
 import os.path
 from datetime import datetime
-import time
+# import time
 import json
 
 from comet_ml import Experiment
@@ -21,6 +21,7 @@ from pcse_gym.envs.sb3 import get_policy_kwargs, get_model_kwargs
 from pcse_gym.utils.eval import EvalCallback, determine_and_log_optimum
 from pcse_gym.utils.normalization import VecNormalizePO
 import pcse_gym.utils.defaults as defaults
+from pcse_gym.agent.masked_rppo import MaskedRecurrentActorCriticPolicy
 
 path_to_program = lib_programname.get_path_executed_script()
 rootdir = path_to_program.parents[0]
@@ -75,6 +76,8 @@ def args_func(parser):
     parser.add_argument("--measure-all", action='store_true', dest='measure_all')
     parser.add_argument("--overfit", action='store_true', dest='overfit')
     parser.add_argument("--year", type=int, default=None, dest='year')
+    parser.add_argument("--vision", type=str, default=None, dest='vision')
+    parser.add_argument("--masked-rppo", type=int, default=0, dest='masked_rppo')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
@@ -100,7 +103,7 @@ def wrapper_vectorized_env(env_pcse_train, flag_po, flag_eval=False, multiproc=F
                             clip_obs=10., clip_reward=50., gamma=1)
 
 
-def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
+def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_masked):
     if agent == 'PPO':
         hyperparams = {'batch_size': 64, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 0.0,
                        'clip_range': 0.3,
@@ -131,6 +134,8 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary):
         hyperparams['policy_kwargs']['net_arch'] = dict(pi=[256, 256], vf=[256, 256])
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
+        if rppo_masked > 0:
+            hyperparams['policy_kwargs']['max_non_zero_actions'] = rppo_masked
     if agent == 'A2C':
         hyperparams = {'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 0.0,
                        'gae_lambda': 0.9, 'vf_coef': 0.4,  # 'rms_prop_eps': 1e-5, 'normalize_advantage': True,
@@ -166,6 +171,13 @@ def get_json_config(n_steps, crop_features, weather_features, train_years, test_
         test_locations=test_locations, action_space=action_space, pcse_model=pcse_model, agent=agent, reward=reward,
         seed=seed, costs_nitrogen=costs_nitrogen, kwargs=kwargs
     )
+
+
+def get_rppo_policy(masked):
+    if masked == 0:
+        return 'MlpLstmPolicy'
+    elif masked > 0:
+        return MaskedRecurrentActorCriticPolicy
 
 
 def train(log_dir, n_steps,
@@ -222,6 +234,7 @@ def train(log_dir, n_steps,
     cost_measure = kwargs.get('cost_measure', None)
     measure_all = kwargs.get('measure_all', None)
     n_envs = kwargs.get('n_envs', 4)
+    masked_rppo = kwargs.get('masked_rppo')
 
     from stable_baselines3 import PPO, DQN, A2C
     from stable_baselines3.common.monitor import Monitor
@@ -230,7 +243,7 @@ def train(log_dir, n_steps,
     print('Using the StableBaselines3 framework')
     print(f'Train model {pcse_model_name} with {agent} algorithm and seed {seed}. Logdir: {log_dir}')
 
-    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary)
+    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, rppo_masked=masked_rppo)
 
     # TODO register env initialization for robustness
     # register_cropgym_env = register_cropgym_envs()
@@ -272,7 +285,8 @@ def train(log_dir, n_steps,
         from sb3_contrib import RecurrentPPO
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
-        model = RecurrentPPO('MlpLstmPolicy', env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
+        rppo_policy = get_rppo_policy(masked_rppo)
+        model = RecurrentPPO(rppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
                              tensorboard_log=log_dir, device=device)
 
     # wrap comet after VecEnvs
@@ -332,7 +346,7 @@ def train(log_dir, n_steps,
         comet_log.add_tag(cost_measure)
     tb_log_name = tb_log_name + '-run'
 
-    start_time = time.time()
+    start_time = datetime.now()
     print(f"Time started training: {start_time}")
 
     model.learn(total_timesteps=n_steps,
@@ -343,7 +357,7 @@ def train(log_dir, n_steps,
                                       **kwargs),
                 tb_log_name=tb_log_name)
 
-    print(f'Time taken to train {tb_log_name}: {time.time() - start_time}')
+    print(f'Time taken to train {tb_log_name}: {datetime.now() - start_time}')
 
 
 if __name__ == '__main__':
@@ -401,7 +415,7 @@ if __name__ == '__main__':
             parser.error("--location arg should be either LT or NL")
 
     # define the crop, weather and (maybe) action features used in training
-    crop_features = defaults.get_default_crop_features(pcse_env=args.environment, minimal=False)
+    crop_features = defaults.get_default_crop_features(pcse_env=args.environment, vision=args.vision)
     weather_features = defaults.get_default_weather_features()
     action_features = defaults.get_default_action_features()
 
@@ -413,7 +427,8 @@ if __name__ == '__main__':
               'mask_binary': args.obs_mask, 'placeholder_val': args.placeholder_val, 'normalize': args.normalize,
               'loc_code': args.location, 'cost_measure': args.cost_measure, 'start_type': args.start_type,
               'random_init': args.random_init, 'm_multiplier': args.m_multiplier, 'measure_all': args.measure_all,
-              'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs}
+              'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs, 'vision': args.vision,
+              'masked_rppo': args.masked_rppo, }
 
     assert not (args.environment == 2 and args.measure is True), "WOFOST SNOMIN doesn't support AFA-POMDPs yet"
     # define MeasureOrNot environment if specified
