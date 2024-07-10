@@ -3,6 +3,7 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 from collections import defaultdict
+import datetime
 
 
 def get_cumulative_variables():
@@ -495,7 +496,7 @@ def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
     return ax
 
 
-def plot_nue_template(show_graph_labels=False, max=400) -> plt:
+def plot_nue_template(show_graph_labels=False, size=(10, 8), max=300) -> plt:
     l = max
 
     n_in = np.linspace(0, l, l)
@@ -511,7 +512,7 @@ def plot_nue_template(show_graph_labels=False, max=400) -> plt:
     max_surplus_line = n_in - 80
     max_surplus_line[max_surplus_line < 0] = 0
 
-    plt.figure(figsize=(14, 10))
+    plt.figure(figsize=size)
     plt.plot(n_in, n_output_50, 'k-', label='NUE = 50%' if show_graph_labels else '')
     plt.plot(n_in, n_output_90, 'k-', label='NUE = 90%' if show_graph_labels else '')
     plt.plot(n_in, min_productivity_output, 'k-.',
@@ -528,3 +529,40 @@ def plot_nue_template(show_graph_labels=False, max=400) -> plt:
                      label='Desired maximum surplus (N input - N output)' if show_graph_labels else '')
 
     return plt
+
+def plot_fertilization_schedule(fertilization_policies, growth):
+    import matplotlib.dates as mdates
+
+    start_date = datetime.date(1989, 10, 3)
+    end_date = datetime.date(1990, 8, 20)
+
+    # Generate weekly date range
+    date_range = pd.date_range(start=start_date, end=end_date, freq='W-SUN')
+
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+
+    # Plot yield data
+    for agent, agent_v in growth.items():
+        ax1.plot(date_range, agent_v, alpha=.9, label=agent[0])
+    ax1.set_xlabel('Date in growing year')
+    ax1.set_ylabel('Aggregated median yield growth [kg/ha]')
+    ax1.legend(loc='upper left')
+
+    # Plot fertilization policy as vertical bars
+    ax2 = ax1.twinx()
+    offsets = np.linspace(-3, 3, len(fertilization_policies))
+    for i, (agent, agent_v) in enumerate(fertilization_policies.items()):
+        shifted_dates = date_range + pd.to_timedelta(offsets[i], unit='D')
+        ax2.bar(shifted_dates, agent_v, width=3, alpha=.9, label=agent[0])
+    ax2.set_ylabel('Fixed fertilizer applications [kg/ha]')
+    ax2.set_ylim(0, 100)  # Adjust this based on the range of your fertilization policies
+
+    # Set x-axis major ticks format
+    ax1.xaxis.set_major_locator(mdates.MonthLocator())
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+
+    plt.grid(True)
+    plt.tight_layout()
+    plt.legend(loc='lower right')
+    plt.show()

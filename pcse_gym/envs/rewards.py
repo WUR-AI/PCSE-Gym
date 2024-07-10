@@ -511,7 +511,7 @@ class Rewards:
 
         @staticmethod
         def n_surplus_condition(b, c):
-            if 0 < b <= 80 and c == 1:
+            if 0 < b <= 40 and c == 1:
                 return 2
             else:
                 return 1

@@ -371,7 +371,23 @@ class FindOptimum():
             action = 0
             if week < num_weeks:
                 x = schedule[week]
-                action = x / 10
+                action = x
+            _, reward, terminated, _, _ = self.env.step(action)
+            total_reward += reward
+            week += 1
+        return total_reward
+
+    def weekly_short_dumps(self, year, schedule, start_week, end_week):
+        self.env.overwrite_year(year)
+        self.env.reset()
+        terminated = False
+        total_reward = 0.0
+        week = 0
+        while not terminated:
+            action = 0
+            if start_week <= week < end_week:
+                x = schedule[week-start_week]
+                action = x
             _, reward, terminated, _, _ = self.env.step(action)
             total_reward += reward
             week += 1
@@ -384,7 +400,7 @@ class FindOptimum():
             print(f'- {year} {reward}')
         return res.x
 
-    def optimize_weekly_dump(self, num_weeks=45, bounds=(0.0, 100.0), eval_year=None):
+    def optimize_weekly_dump(self, num_weeks=45, bounds=(0.0, 10.0), eval_year=None, limited=False):
         def objective(fertilization_schedule):
             # Sanity check
             # Negative of the reward because we are minimizing
@@ -392,17 +408,83 @@ class FindOptimum():
             total_reward = 0
             for year in self.train_years:
                 total_reward += self.weekly_dumps(year, fertilization_schedule, num_weeks)
-            return -total_reward  # We want to minimize the reward so negative value
+            return -total_reward
 
         # Start with lowest and make list as long as weeks
-        initial_guess = np.full(num_weeks, bounds[0])
         bounds = [bounds] * num_weeks
 
         print(f"Start Optimizing episode for year {eval_year}!")
 
         start_time = time.time()
-        res = dual_annealing(objective, bounds, x0=initial_guess)
+        res = dual_annealing(objective, bounds)
         # res = minimize(objective, initial_guess, bounds=bounds, method='L-BFGS-B')
+        end_time = time.time()
+
+        print(f"Time taken for optimization: {end_time - start_time} s")
+
+        print(f'Optimum found for {self.train_years} with fertilization schedule {res.x} yielding {-res.fun}')
+        return res.x
+
+    def optimize_constrained_dump(self, bounds=(0, 10.0), start_week=5, end_week=30, eval_year=None, limited=False):
+        def objective(fertilization_schedule):
+            # Sanity check
+            # Negative of the reward because we are minimizing
+            if limited is True:
+                # Constraint: Fertilize a maximum of 4 times per week between weeks 4 and 30
+                non_zero_weeks = (fertilization_schedule > 0).sum()
+                if non_zero_weeks > 4:
+                    return (max(0, non_zero_weeks - 4) ** 2) * 10  # Quadratic penalty
+
+            total_reward = 0
+            for year in self.train_years:
+                total_reward += self.weekly_short_dumps(year, fertilization_schedule, start_week, end_week)
+            return -total_reward
+
+        # Start with lowest and make list as long as weeks
+        bounds = [bounds] * (end_week - start_week)
+        # Provide an initial guess within the bounds
+        # initial_guess = [0.0] * (end_week - start_week)  # Start with no fertilization
+        # for i in range(0, (end_week - start_week)):  # Allow some initial fertilization within the range
+        #     if i % 7 == 0:  # Fertilize every 7th week as an initial guess
+        #         initial_guess[i] = (bounds[0][1] - bounds[0][0]) / 2  # Midpoint of the bounds
+        # initial_guess = np.array(initial_guess)
+        print(f"Start Optimizing constrained episode for year {eval_year} {'limited to 4 actions' if limited is True else ''}!")
+
+        start_time = time.time()
+        res = dual_annealing(objective, bounds)
+        # res = differential_evolution(objective, bounds, strategy='best1bin', maxiter=1000, popsize=15, tol=0.01)
+        # res = minimize(objective, initial_guess, bounds=bounds, method='L-BFGS-B')
+        end_time = time.time()
+
+        print(f"Time taken for optimization: {end_time - start_time} s")
+
+        print(f'Optimum found for {self.train_years} with fertilization schedule {res.x} yielding {-res.fun}')
+        return res.x
+
+    def optimize_weekly_dump_minimize(self, num_weeks=45, bounds=(0.0, 10.0), eval_year=None, limited=False):
+        def objective(fertilization_schedule):
+            # Negative of the reward because we are minimizing
+            total_reward = 0
+            for year in self.train_years:
+                total_reward += self.weekly_dumps(year, fertilization_schedule, num_weeks)
+            return -total_reward
+
+        def count_non_zero(fertilization_schedule):
+            # Constraint function to ensure only 4 non-zero values
+            return 4 - np.count_nonzero(fertilization_schedule)
+
+        # Start with lowest and make list as long as weeks
+        bounds = [bounds] * num_weeks
+
+        # Constraint to have exactly 4 non-zero values in the schedule
+        constraints = [{'type': 'eq', 'fun': count_non_zero}]
+
+        print(f"Start Optimizing episode for year {eval_year}!")
+
+        start_time = time.time()
+        initial_guess = np.zeros(num_weeks)  # Start with all zeros
+
+        res = minimize(objective, initial_guess, bounds=bounds, constraints=constraints, method='SLSQP')
         end_time = time.time()
 
         print(f"Time taken for optimization: {end_time - start_time} s")
@@ -499,6 +581,7 @@ class EvalCallback(BaseCallback):
         self.random_weather = kwargs.get('random_weather', False)
         self.multiprocess = multiprocess
         self.n_envs = kwargs.get('n_envs')
+        self.masked_rppo = kwargs.get('masked_rppo')
 
         def def_value(): return 0
 
@@ -562,6 +645,11 @@ class EvalCallback(BaseCallback):
         self.histogram_training_years[train_year] = self.histogram_training_years[train_year] + 1
         train_location = self.model.get_env().get_attr("loc")[0]
         self.histogram_training_locations[train_location] = self.histogram_training_locations[train_location] + 1
+
+        if self.locals['dones'].item() is not False and self.masked_rppo > 0:
+            # Reset the non-zero action count in the policy
+            # print('reset counter!')
+            self.model.policy.reset_non_zero_action_count()
 
         '''Evaluate episodes with learned policy and log it in tensorboard'''
         if self.n_calls % self.eval_freq == 0 or self.n_calls == 1:

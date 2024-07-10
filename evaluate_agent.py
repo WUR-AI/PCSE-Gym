@@ -14,8 +14,8 @@ import datetime
 
 from torch.utils.tensorboard import SummaryWriter
 
+from pcse_gym.initialize_envs import initialize_env as init_env
 from pcse_gym.envs.winterwheat import WinterWheat, WinterWheatRay
-from pcse_gym.envs.sb3 import get_model_kwargs
 import pcse_gym.utils.defaults as defaults
 import pcse_gym.utils.eval as eval
 from pcse_gym.utils.nitrogen_helpers import get_standard_practices, treatments_list
@@ -42,48 +42,6 @@ def get_action_space(nitrogen_levels=7, po_features=[]):
     else:
         space_return = gym.spaces.Discrete(nitrogen_levels)
     return space_return
-
-
-def initialize_env(pcse_env=1, po_features=[],
-                   crop_features=defaults.get_default_crop_features(pcse_env=1, minimal=True),
-                   costs_nitrogen=10, reward='DEF', nitrogen_levels=7, action_multiplier=1.0, add_random=False,
-                   years=defaults.get_default_train_years(), locations=defaults.get_default_location(), args_vrr=False,
-                   action_limit=0, noisy_measure=False, n_budget=0, no_weather=False, framework='sb3',
-                   mask_binary=False, random_weather=False,
-                   placeholder_val=-1.11, normalize=False, loc_code='NL', cost_measure='real', start_type='sowing',
-                   random_init=False, m_multiplier=1, measure_all=False, seed=None):
-    if add_random:
-        po_features.append('random'), crop_features.append('random')
-    action_space = get_action_space(nitrogen_levels=nitrogen_levels, po_features=po_features)
-    kwargs = dict(po_features=po_features, args_measure=po_features is not None, args_vrr=args_vrr,
-                  action_limit=action_limit, noisy_measure=noisy_measure, n_budget=n_budget, no_weather=no_weather,
-                  mask_binary=mask_binary, placeholder_val=placeholder_val, normalize=normalize, loc_code=loc_code,
-                  cost_measure=cost_measure, start_type=start_type, random_init=random_init, m_multiplier=m_multiplier,
-                  measure_all=measure_all, random_weather=random_weather, )
-    if framework == 'sb3':
-        env_return = WinterWheat(crop_features=crop_features,
-                                 costs_nitrogen=costs_nitrogen,
-                                 years=years,
-                                 locations=locations,
-                                 action_space=action_space,
-                                 action_multiplier=action_multiplier,
-                                 reward=reward,
-                                 **get_model_kwargs(pcse_env, locations, start_type=kwargs.get('start_type', 'sowing')),
-                                 **kwargs, seed=seed)
-    elif framework == 'rllib':
-        from pcse_gym.utils.rllib_helpers import ww_lim, winterwheat_config_maker
-        config = winterwheat_config_maker(crop_features=crop_features,
-                                          costs_nitrogen=costs_nitrogen, years=years,
-                                          locations=locations,
-                                          action_space=action_space,
-                                          action_multiplier=1.0,
-                                          reward=reward, pcse_model=1,
-                                          **get_model_kwargs(1, locations),
-                                          **kwargs)
-        env_return = ww_lim(config)
-    else:
-        raise Exception("Invalid framework!")
-    return env_return
 
 
 def measure_history_histogram(data, year, location, crop_var, axes):
@@ -177,25 +135,35 @@ def evaluate_treatment(policy, env, n_eval_episodes=1):
     return episode_rewards, episode_infos
 
 
-def get_ceres_policy(location, year):
-    with open(os.path.join(rootdir, "ceres_results", f"{location[0]}-{location[1]}.csv"), "r") as file:
+def get_demeter_policy(location, year, constrained=True):
+    if constrained:
+        with open(os.path.join(rootdir, "ceres_results", 'constrained', f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+            df_ceres = pd.read_csv(file, header=0)
+        return list(df_ceres[str(year)])
+    with open(os.path.join(rootdir, "ceres_results", f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
         df_ceres = pd.read_csv(file, header=0)
     return list(df_ceres[str(year)])
 
 
-def evaluate_demeter(env, n_eval_episodes=1):
+def evaluate_demeter(env, n_eval_episodes=1, constrained=True):
     episode_rewards, episode_infos = [], []
     for i in range(n_eval_episodes):
         episode_reward = 0
         terminated, truncated, prev_action, prev_reward, info = False, False, None, None, None
         infos_this_episode = []
-        fert_amounts = get_ceres_policy(env.loc, env.sb3_env.agmt.get_end_date.year)
+        fert_amounts = get_demeter_policy(env.loc, env.sb3_env.agmt.get_end_date.year, constrained=constrained)
         week = 0
         while not terminated or truncated:
             action = 0
-            if fert_amounts[week] > 0.0:
-                action = fert_amounts[week] / 10
-                print(f"fertilized {action} at week {week}")
+            if constrained:
+                if 5 <= week < 30:
+                    if fert_amounts[week] > 0.0:
+                        action = fert_amounts[week-5]
+                        print(f"fertilized {action} at week {week}")
+            else:
+                if fert_amounts[week] > 0.0:
+                    action = fert_amounts[week]
+                    print(f"fertilized {action} at week {week}")
             obs, reward, terminated, truncated, info = env.step(action)
 
             episode_reward += reward
@@ -226,7 +194,7 @@ def low_n_init() -> dict:
 
 def high_n_init() -> dict:
     n_dict = {'NH4I': [3.15162898, 3.87070563, 1.37766539, 1.17044373, 1.58129878, 0.66062145, 0.18763604],
-              'NO3I': [5.42620968, 16.4380931 , 25.73569722,  9.2684839 ,  1.24005868, 2.94257558,  6.94888184], }
+              'NO3I': [5.42620968, 16.4380931, 25.73569722, 9.2684839, 1.24005868, 2.94257558, 6.94888184], }
     return n_dict
 
 
@@ -261,6 +229,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-weather", action='store_true', dest='no_weather')
     parser.add_argument("--random_feature", action='store_true', dest='random_feature')
     parser.add_argument("--init-n", type=str, default=None, dest='init_n')
+    parser.add_argument("--vision", type=str, default=None, dest='vision')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3', no_weather=False,
                         random_feature=False, random_weather=False)
     args = parser.parse_args()
@@ -304,7 +273,7 @@ if __name__ == "__main__":
                 eval_year = [*range(1990, 2024)]
             elif args.location == "PAGV":
                 eval_year = [*range(1983, 2022)]
-    crop_features = defaults.get_default_crop_features(pcse_env=args.environment, minimal=False)
+    crop_features = defaults.get_default_crop_features(pcse_env=args.environment, vision=args.vision)
     weather_features = defaults.get_default_weather_features()
     action_features = defaults.get_default_action_features()
 
@@ -364,14 +333,14 @@ if __name__ == "__main__":
         from stable_baselines3.common.monitor import Monitor
 
         nitrogen_levels = 9  # 0 - 80 kg/ha
-        env = initialize_env(crop_features=crop_features,
-                             costs_nitrogen=args.costs_nitrogen,
-                             years=eval_year,
-                             locations=eval_locations,
-                             reward=args.reward,
-                             pcse_env=args.environment,
-                             nitrogen_levels=nitrogen_levels,
-                             **kwargs)
+        env = init_env(crop_features=crop_features,
+                       costs_nitrogen=args.costs_nitrogen,
+                       years=eval_year,
+                       locations=eval_locations,
+                       reward=args.reward,
+                       pcse_env=args.environment,
+                       nitrogen_levels=nitrogen_levels,
+                       **kwargs)
         cust_objects = {"lr_schedule": lambda x: 0.0001, "clip_range": lambda x: 0.4,
                         "action_space": action_spaces}
         if args.agent in ['PPO', 'RPPO']:

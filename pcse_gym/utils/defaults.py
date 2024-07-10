@@ -20,17 +20,23 @@ def get_wofost_minimal_crop_features(pcse_env):
         return ["DVS", "TAGP", "LAI", "NuptakeTotal", "NO3", "NH4", "SM"]
 
 
+def get_wofost_limited_crop_features():
+    return ["DVS", "TAGP", "LAI", "SM"]
+
+
 def get_wofost_default_po_features():
     # See get_titles() for description of variables
     return ["TAGP", "LAI", "NAVAIL", "NuptakeTotal", "SM"]
 
 
-def get_default_crop_features(pcse_env=1, minimal=False):
-    if pcse_env == 1 and minimal:
+def get_default_crop_features(pcse_env=1, vision=None):
+    if pcse_env == 1 and vision is None:
         crop_features = get_wofost_minimal_crop_features(pcse_env)
     elif pcse_env == 1:
         crop_features = get_wofost_default_crop_features(pcse_env)
-    elif pcse_env == 2 and minimal:
+    elif pcse_env == 2 and vision == 'limited':
+        crop_features = get_wofost_limited_crop_features()
+    elif pcse_env == 2 and vision == 'minimal':
         crop_features = get_wofost_minimal_crop_features(pcse_env)
     elif pcse_env == 2:
         crop_features = get_wofost_default_crop_features(pcse_env)
@@ -45,7 +51,7 @@ def get_default_weather_features():
 
 
 def get_default_action_features():
-    return []
+    return ["action_history"]
 
 
 def get_default_location():
