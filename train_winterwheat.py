@@ -78,6 +78,7 @@ def args_func(parser):
     parser.add_argument("--year", type=int, default=None, dest='year')
     parser.add_argument("--vision", type=str, default=None, dest='vision')
     parser.add_argument("--masked-rppo", type=int, default=0, dest='masked_rppo')
+    parser.add_argument("--decay-entropy", action='store_true', default=False, dest='decay_entropy')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
@@ -103,9 +104,9 @@ def wrapper_vectorized_env(env_pcse_train, flag_po, flag_eval=False, multiproc=F
                             clip_obs=10., clip_reward=50., gamma=1)
 
 
-def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_masked):
+def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_masked, decay_entropy):
     if agent == 'PPO':
-        hyperparams = {'batch_size': 64, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 0.0,
+        hyperparams = {'batch_size': 64, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
                        'clip_range': 0.3,
                        'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.4,
                        'policy_kwargs': {},
@@ -120,7 +121,7 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_mask
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
     if agent == 'RPPO':
-        hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 0.0,
+        hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
                        'clip_range': 0.2,
                        'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.4,
                        'policy_kwargs': {},
@@ -136,8 +137,12 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_mask
         hyperparams['policy_kwargs']['ortho_init'] = False
         if rppo_masked > 0:
             hyperparams['policy_kwargs']['max_non_zero_actions'] = rppo_masked
+            if decay_entropy:
+                hyperparams['policy_kwargs']['apply_masking'] = False
+            else:
+                hyperparams['policy_kwargs']['apply_masking'] = True
     if agent == 'A2C':
-        hyperparams = {'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 0.0,
+        hyperparams = {'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
                        'gae_lambda': 0.9, 'vf_coef': 0.4,  # 'rms_prop_eps': 1e-5, 'normalize_advantage': True,
                        'policy_kwargs': {},
                        }
@@ -235,6 +240,7 @@ def train(log_dir, n_steps,
     measure_all = kwargs.get('measure_all', None)
     n_envs = kwargs.get('n_envs', 4)
     masked_rppo = kwargs.get('masked_rppo')
+    decay_entropy = kwargs.get('decay_entropy')
 
     from stable_baselines3 import PPO, DQN, A2C
     from stable_baselines3.common.monitor import Monitor
@@ -243,7 +249,7 @@ def train(log_dir, n_steps,
     print('Using the StableBaselines3 framework')
     print(f'Train model {pcse_model_name} with {agent} algorithm and seed {seed}. Logdir: {log_dir}')
 
-    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, rppo_masked=masked_rppo)
+    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, rppo_masked=masked_rppo, decay_entropy=decay_entropy)
 
     # TODO register env initialization for robustness
     # register_cropgym_env = register_cropgym_envs()
@@ -428,7 +434,10 @@ if __name__ == '__main__':
               'loc_code': args.location, 'cost_measure': args.cost_measure, 'start_type': args.start_type,
               'random_init': args.random_init, 'm_multiplier': args.m_multiplier, 'measure_all': args.measure_all,
               'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs, 'vision': args.vision,
-              'masked_rppo': args.masked_rppo, }
+              'masked_rppo': args.masked_rppo, 'decay_entropy': args.decay_entropy, 'nsteps': args.nsteps,}
+
+    if args.decay_entropy:
+        print('Training with entropy decay')
 
     assert not (args.environment == 2 and args.measure is True), "WOFOST SNOMIN doesn't support AFA-POMDPs yet"
     # define MeasureOrNot environment if specified

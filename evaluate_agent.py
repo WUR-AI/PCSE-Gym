@@ -230,6 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--random_feature", action='store_true', dest='random_feature')
     parser.add_argument("--init-n", type=str, default=None, dest='init_n')
     parser.add_argument("--vision", type=str, default=None, dest='vision')
+    parser.add_argument("-v", "--visualize", action='store_true', default=False, dest='visualize')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3', no_weather=False,
                         random_feature=False, random_weather=False)
     args = parser.parse_args()

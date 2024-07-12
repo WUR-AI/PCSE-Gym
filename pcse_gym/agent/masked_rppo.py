@@ -12,10 +12,14 @@ from typing import Any, Dict, List, Optional, Type, Union, Tuple
 
 
 class MaskedRecurrentActorCriticPolicy(RecurrentActorCriticPolicy):
-    def __init__(self, *args, max_non_zero_actions: int = 4, **kwargs):
+    def __init__(self, *args, max_non_zero_actions: int = 4, apply_masking=False, **kwargs):
         super(MaskedRecurrentActorCriticPolicy, self).__init__(*args, **kwargs)
         self.max_non_zero_actions = max_non_zero_actions
         self.non_zero_action_count = 0
+        self.apply_masking = apply_masking
+
+    def set_masking(self, apply_masking: bool):
+        self.apply_masking = apply_masking
 
     def reset_non_zero_action_count(self):
         self.non_zero_action_count = 0
@@ -62,7 +66,7 @@ class MaskedRecurrentActorCriticPolicy(RecurrentActorCriticPolicy):
         action_logits = distribution.distribution.logits
 
         # Apply masking to logits based on the number of non-zero actions taken
-        if self.non_zero_action_count >= self.max_non_zero_actions:
+        if self.apply_masking and self.non_zero_action_count >= self.max_non_zero_actions:
             action_mask = torch.ones_like(action_logits)
             # Mask all non-zero actions with -inf
             # ensuring they never get picked after the condition

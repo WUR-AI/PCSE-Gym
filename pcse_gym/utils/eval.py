@@ -582,6 +582,15 @@ class EvalCallback(BaseCallback):
         self.multiprocess = multiprocess
         self.n_envs = kwargs.get('n_envs')
         self.masked_rppo = kwargs.get('masked_rppo')
+        self.decay_entropy = kwargs.get('decay_entropy')
+        self.total_timesteps = kwargs.get('nsteps')
+        self.initial_ent_coef = 1.0
+        self.final_ent_coef = 0.0
+        self.anneal_start_fraction = 0.0
+        self.anneal_end_fraction = 0.35
+        self.apply_after_percentage = 0.5
+        self.apply_after_timestep = int(self.apply_after_percentage * self.total_timesteps)
+        self.apply_masking = False
 
         def def_value(): return 0
 
@@ -650,6 +659,21 @@ class EvalCallback(BaseCallback):
             # Reset the non-zero action count in the policy
             # print('reset counter!')
             self.model.policy.reset_non_zero_action_count()
+
+        # For decaying of entropy coefficient
+        if self.decay_entropy:
+            if self.num_timesteps >= self.apply_after_timestep:
+                if not self.apply_masking:
+                    self.apply_masking = True
+                    # Set the policy to apply masking
+                    self.model.policy.set_masking(True)
+
+            progress = self.num_timesteps / self.total_timesteps
+
+            if self.anneal_start_fraction <= progress <= self.anneal_end_fraction:
+                # Linear annealing
+                fraction = (progress - self.anneal_start_fraction) / (self.anneal_end_fraction - self.anneal_start_fraction)
+                self.model.ent_coef = self.initial_ent_coef + fraction * (self.final_ent_coef - self.initial_ent_coef)
 
         '''Evaluate episodes with learned policy and log it in tensorboard'''
         if self.n_calls % self.eval_freq == 0 or self.n_calls == 1:
