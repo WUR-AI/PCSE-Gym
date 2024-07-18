@@ -482,7 +482,7 @@ class Rewards:
                 n_surplus = get_surplus_n(n_fertilized, n_output, year=year, start=start, end=end)
             end_yield = super().dump_cumulative_positive_reward
 
-            return self.nue_condition(nue) * self.n_surplus_condition(n_surplus, self.nue_condition(nue)) * end_yield
+            return self.n_surplus_condition(n_surplus, self.nue_condition(nue)) * end_yield
 
         def calculate_reward_nue_simple(self, n_input, n_output, year=None, start=None, end=None):
             nue = calculate_nue(n_input, n_output, year=year, start=start, end=end)
@@ -510,11 +510,23 @@ class Rewards:
                 return upper_bound * np.exp(-10 * (b - upper_bound)) + 0.1
 
         @staticmethod
+        def nue_condition_simple(b, lower_bound=0.7, upper_bound=0.85):
+            """
+            For NUE reward, coefficient indicating how close the NUE in the range of lower_bound-upper_bound
+            """
+            if b < lower_bound:
+                return 0
+            elif lower_bound <= b <= upper_bound:
+                return 1
+            else:  # b > upper_bound
+                return 0
+
+        @staticmethod
         def n_surplus_condition(b, c):
             if 0 < b <= 40 and c == 1:
-                return 2
-            else:
                 return 1
+            else:
+                return 0
 
         def reset(self):
             super().reset()
