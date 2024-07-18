@@ -45,7 +45,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     Processes input features: average pool timeseries (weather) and concat with scalars (crop features)
     """
 
-    def __init__(self, observation_space: gym.spaces.Box, n_timeseries, n_scalars, n_actions, n_timesteps=7, n_po_features=5, mask_binary=False):
+    def __init__(self, observation_space: gym.spaces.Box, n_timeseries, n_scalars, n_actions=0, n_timesteps=7, n_po_features=5, mask_binary=False):
         self.n_timeseries = n_timeseries
         self.n_scalars = n_scalars
         self.n_actions = n_actions
@@ -303,13 +303,13 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
                 # Loop through some checks to grab correct obs
                 if feature in ['SM', 'NH4', 'NO3', 'WC']:
                     if feature in ['NH4', 'NO3']:
-                        obs[i] = sum(observation['crop_model'][feature][-1])
+                        obs[i] = sum(observation['crop_model'][feature][-1]) / m2_to_ha
                     elif feature in ['SM', 'WC'] and self.pcse_env == 1:
                         obs[i] = observation['crop_model'][feature][-1]
-                    elif feature in ['RNO3DEPOSTT', 'RNH4DEPOSTT', 'NO3', 'NH4']:
-                        obs[i] = observation['crop_model'][feature][-1] / m2_to_ha
                     else:
-                        obs[i] = observation['crop_model'][feature][-1][0]
+                        obs[i] = np.mean(observation['crop_model'][feature][-1])
+                elif feature in ['RNO3DEPOSTT', 'RNH4DEPOSTT']:
+                    obs[i] = observation['crop_model'][feature][-1] / m2_to_ha
                 else:
                     obs[i] = observation['crop_model'][feature][-1]
 
