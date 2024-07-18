@@ -4,6 +4,7 @@ import lib_programname
 import numpy as np
 import pandas as pd
 from collections import defaultdict, namedtuple
+import argparse
 
 from pcse_gym.utils.plotter import plot_nue_template, plot_variable, plot_fertilization_schedule
 from pcse_gym.envs.rewards import calculate_nue
@@ -16,10 +17,10 @@ rootdir = path_to_program.parents[0]
 evaluate_dir = os.path.join(rootdir, "tensorboard_logs")
 
 
-def make_df(rewards, nue, wso, fertilization):
-    def combine_dicts(d1, d2, d3, d4):
+def make_df(rewards, nue, wso, fertilization, nsurplus):
+    def combine_dicts(d1, d2, d3, d4, d5):
 
-        ds = [d1, d2, d3, d4]
+        ds = [d1, d2, d3, d4, d5]
         d = {}
         for k in d1.keys():
             d[k] = tuple(d[k] for d in ds)
@@ -29,7 +30,7 @@ def make_df(rewards, nue, wso, fertilization):
         if tup == (52.57, 5.63):
             return 'PAGV'
 
-    combined = combine_dicts(rewards, nue, wso, fertilization)
+    combined = combine_dicts(rewards, nue, wso, fertilization, nsurplus)
     model_idx = [k[0] for k in combined.keys()]
     year_idx = [k[1][0] for k in combined.keys()]
     location_idx = [check_location(k[1][1]) for k in combined.keys()]
@@ -37,13 +38,15 @@ def make_df(rewards, nue, wso, fertilization):
     nue_values = [v[1] for v in combined.values()]
     wso_values = [v[2] for v in combined.values()]
     fert_values = [v[3] for v in combined.values()]
+    nsurplus_values = [v[4] for v in combined.values()]
     df = pd.DataFrame({'model': model_idx,
                        'year': year_idx,
                        'location': location_idx,
                        'NUE': nue_values,
                        'WSO': wso_values,
                        'reward': reward_values,
-                       'fertilization': fert_values})
+                       'fertilization': fert_values,
+                       'nsurplus': nsurplus_values})
     df.set_index(['model', 'year', 'location'], inplace=True)
     print(df)
     df.to_excel(os.path.join(evaluate_dir, "nue1.xlsx"))
@@ -52,12 +55,16 @@ def make_df(rewards, nue, wso, fertilization):
 
 def convert_latex(df):
     df['WSO'] = df['WSO'].apply(lambda x: x / 1000)
-    df.columns = ['NUE [-]', 'WSO [tons/ha]', 'Reward [-]', 'Nitrogen [kg/ha]']
+    df.columns = ['NUE [-]', 'WSO [tons/ha]', 'Reward [-]', 'Nitrogen [kg/ha]', 'N-Surplus [kg/ha]']
     print(df.to_latex(column_format='lccrrr', float_format='%.2f'))
 
 
 def main():
-    dir_pkls = os.path.join(evaluate_dir, 'for_plots', '1990')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--year", type=str)
+    args = parser.parse_args()
+
+    dir_pkls = os.path.join(evaluate_dir, 'for_plots', args.year)
     pkl_list = os.listdir(dir_pkls)
 
     result_dict = {}
@@ -75,9 +82,10 @@ def main():
     rewards = {}
     input_n = {}
     WSO_list = {}
-    WSO =  {}
+    WSO = {}
     NUE = {}
     fertilization_list= {}
+    Nsurplus = {}
     for name, v in result_dict.items():
         for yearloc, output in v.items():
             print(output[0].keys())
@@ -94,12 +102,13 @@ def main():
             WSO[(name, yearloc)] = list(output[0]['WSO'].values())[-1]
             rewards[(name, yearloc)] = np.cumsum(list(output[0]['reward'].values()))[-1]
             NUE[(name, yearloc)] = list(output[0]['NUE'].values())[-1]
+            Nsurplus[(name, yearloc)] = list(output[0]['Nsurplus'].values())[-1]
 
-    df = make_df(rewards, NUE, WSO, fertilization)
+    df = make_df(rewards, NUE, WSO, fertilization, Nsurplus)
 
     convert_latex(df)
 
-    print(fertilization_list)
+    print(len(fertilization_list), len(WSO_list))
     plt = plot_nue_template()
 
     for key, n_in, n_out in zip(input_n.keys(), input_n.values(), NSO.values()):

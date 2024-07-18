@@ -27,7 +27,7 @@ def get_action_space(nitrogen_levels=7, po_features=[], measure_all=False):
 
 
 def initialize_env(pcse_env=1, po_features=[],
-                   crop_features=defaults.get_default_crop_features(pcse_env=1, minimal=True),
+                   crop_features=defaults.get_default_crop_features(pcse_env=1, vision=None),
                    costs_nitrogen=10, reward='DEF', nitrogen_levels=7, action_multiplier=1.0, add_random=False,
                    years=defaults.get_default_train_years(), locations=defaults.get_default_location(), args_vrr=False,
                    action_limit=0, noisy_measure=False, n_budget=0, no_weather=False, mask_binary=False,
