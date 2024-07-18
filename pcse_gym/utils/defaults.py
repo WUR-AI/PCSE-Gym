@@ -8,8 +8,8 @@ def get_wofost_default_crop_features(pcse_env):
     if pcse_env == 1:
         return ["DVS", "TAGP", "LAI", "NuptakeTotal", "TRA", "NAVAIL", "SM", "RFTRA", "WSO"]
     elif pcse_env == 2:
-        return ["DVS", "TAGP", "LAI", "NuptakeTotal", "TRA", "NO3", "NH4", "SM", "RFTRA", "WSO", "NLOSSCUM", "TSR",
-                'RNO3DEPOSTT', 'RNH4DEPOSTT', 'Ndemand']
+        return ["DVS", "TAGP", "LAI", "NuptakeTotal", "TRA", "NO3", "NH4", "WC", "RFTRA", "WSO", "NLOSSCUM",
+                'RNO3DEPOSTT', 'RNH4DEPOSTT']
 
 
 def get_wofost_minimal_crop_features(pcse_env):
@@ -50,8 +50,8 @@ def get_default_weather_features():
     return ["IRRAD", "TMIN", "RAIN"]
 
 
-def get_default_action_features():
-    return ["action_history"]
+def get_default_action_features(history=False):
+    return ["action_history"] if history else []
 
 
 def get_default_location():
