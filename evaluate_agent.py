@@ -317,16 +317,16 @@ if __name__ == "__main__":
                                   env_pkl_name)
 
     agent = args.agent
-    if args.framework == 'rllib':
-        raise NotImplementedError
-        import ray
-        from ray.rllib.algorithms.algorithm import Algorithm
-
-        agent = Algorithm.from_checkpoint(checkpoint_path)
-        initialize_env(**kwargs)
-        policy = agent.get_policy()
-
-        pass
+    # if args.framework == 'rllib':
+    #     raise NotImplementedError
+    #     import ray
+    #     from ray.rllib.algorithms.algorithm import Algorithm
+    #
+    #     agent = Algorithm.from_checkpoint(checkpoint_path)
+    #     initialize_env(**kwargs)
+    #     policy = agent.get_policy()
+    #
+    #     pass
     if args.framework == 'sb3':
         from stable_baselines3 import PPO
         from sb3_contrib import RecurrentPPO
