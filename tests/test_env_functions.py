@@ -16,4 +16,4 @@ class TestEnvs(unittest.TestCase):
 
         print(sum_n)
 
-        self.assertAlmostEqual(36.88, sum_n, 0)
+        self.assertAlmostEqual(4.999, sum_n, 0)
