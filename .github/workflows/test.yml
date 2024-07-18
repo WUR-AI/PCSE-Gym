@@ -20,7 +20,7 @@ jobs:
           cd /tmp/pcse && pip install --quiet -e . && cd ${GITHUB_WORKSPACE}
           pip install dotmap
           pip install stable_baselines3 sb3-contrib
-          pip install gymnasium==0.28.1 lib_programname tensorboard scipy tqdm pandas numpy==1.26.4
+          pip install gymnasium==0.28.1 lib_programname tensorboard scipy tqdm pandas numpy==1.26.4 seaborn
       - name: Lint with flake8
         run: |
           # stop the build if there are Python syntax errors or undefined names
