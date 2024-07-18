@@ -157,7 +157,7 @@ def evaluate_demeter(env, n_eval_episodes=1, constrained=True):
             action = 0
             if constrained:
                 if 5 <= week < 30:
-                    if fert_amounts[week] > 0.0:
+                    if fert_amounts[week-5] > 0.0:
                         action = fert_amounts[week-5]
                         print(f"fertilized {action} at week {week}")
             else:
