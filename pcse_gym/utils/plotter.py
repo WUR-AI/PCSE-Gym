@@ -541,28 +541,31 @@ def plot_fertilization_schedule(fertilization_policies, growth):
 
     fig, ax1 = plt.subplots(figsize=(12, 6))
 
-
-    # Plot yield data
-    for agent, agent_v in growth.items():
-        ax1.plot(date_range, agent_v, alpha=.9, label=agent[0])
-    ax1.set_xlabel('Date in growing year')
-    ax1.set_ylabel('Aggregated median yield growth [kg/ha]')
-    ax1.legend(loc='upper left')
-
-    # Plot fertilization policy as vertical bars
-    ax2 = ax1.twinx()
     offsets = np.linspace(-3, 3, len(fertilization_policies))
     for i, (agent, agent_v) in enumerate(fertilization_policies.items()):
         shifted_dates = date_range + pd.to_timedelta(offsets[i], unit='D')
-        ax2.bar(shifted_dates, agent_v, width=3, alpha=.9, label=agent[0])
-    ax2.set_ylabel('Fixed fertilizer applications [kg/ha]')
-    ax2.set_ylim(0, 100)  # Adjust this based on the range of your fertilization policies
+        ax1.bar(shifted_dates, agent_v, width=3, alpha=.9, label=agent[0])
+    ax1.set_ylabel('Fertilizer applications [kg/ha]')
+    ax1.yaxis.grid(True, which='major', linestyle='--')
+
+    # Plot fertilization policy as vertical bars
+    ax2 = ax1.twinx()
+
+    # Plot yield data
+    for agent, agent_v in growth.items():
+        if len(date_range) < len(agent_v):
+            agent_v.pop(0)
+        ax2.plot(date_range, agent_v, alpha=.9, label=agent[0])
+    ax2.set_xlabel('Date in growing year')
+    ax2.set_ylabel('Aggregated yield growth [kg/ha]')
+    ax2.yaxis.grid(False)
+    ax2.legend(loc='upper left')
 
     # Set x-axis major ticks format
     ax1.xaxis.set_major_locator(mdates.MonthLocator())
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
 
-    plt.grid(True)
+    # plt.grid(True)
     plt.tight_layout()
     plt.legend(loc='lower right')
     plt.show()
