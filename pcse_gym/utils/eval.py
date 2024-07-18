@@ -9,7 +9,6 @@ import time
 from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
 from scipy.optimize import minimize_scalar, minimize, dual_annealing
-from pyswarm import pso
 from bisect import bisect_left
 from typing import Union
 from statistics import mean, median
@@ -501,6 +500,7 @@ class FindOptimum():
 
 
     def swarm_optimize_weekly_dump(self, num_weeks=31, bounds=(0.0, 100.0), epsilon=1e-6):
+        from pyswarm import pso
         def objective(fertilization_schedule):
             # Sanity check
             # Negative of the reward because we are minimizing
