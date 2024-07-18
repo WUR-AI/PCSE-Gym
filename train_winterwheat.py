@@ -21,7 +21,7 @@ from pcse_gym.envs.sb3 import get_policy_kwargs, get_model_kwargs
 from pcse_gym.utils.eval import EvalCallback, determine_and_log_optimum
 from pcse_gym.utils.normalization import VecNormalizePO
 import pcse_gym.utils.defaults as defaults
-from pcse_gym.agent.masked_rppo import MaskedRecurrentActorCriticPolicy
+from pcse_gym.agent.masked_actorcriticpolicy import MaskedRecurrentActorCriticPolicy, MaskedActorCriticPolicy
 
 path_to_program = lib_programname.get_path_executed_script()
 rootdir = path_to_program.parents[0]
@@ -77,8 +77,9 @@ def args_func(parser):
     parser.add_argument("--overfit", action='store_true', dest='overfit')
     parser.add_argument("--year", type=int, default=None, dest='year')
     parser.add_argument("--vision", type=str, default=None, dest='vision')
-    parser.add_argument("--masked-rppo", type=int, default=0, dest='masked_rppo')
+    parser.add_argument("--masked-ac", type=int, default=0, dest='masked_ac')
     parser.add_argument("--decay-entropy", action='store_true', default=False, dest='decay_entropy')
+    parser.add_argument("--mask-later", action='store_true', default=False, dest='mask_later')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
@@ -95,20 +96,20 @@ def wrapper_vectorized_env(env_pcse_train, flag_po, flag_eval=False, multiproc=F
         return DummyVecEnv([lambda: env_pcse_train])
     if flag_po:
         return VecNormalizePO(DummyVecEnv([lambda: env_pcse_train]), norm_obs=True, norm_reward=True,
-                              clip_obs=10., clip_reward=50., gamma=1)
+                              clip_obs=10000000., clip_reward=100000., gamma=1)
     if multiproc and not flag_eval:
         vec_env = SubprocVecEnv([lambda: env_pcse_train for _ in range(n_envs)])
         return VecNormalize(vec_env)
     else:
         return VecNormalize(DummyVecEnv([lambda: env_pcse_train]), norm_obs=True, norm_reward=True,
-                            clip_obs=10., clip_reward=50., gamma=1)
+                            clip_obs=10000000., clip_reward=100000., gamma=1)  # gamma 1 because fixed length episodes
 
 
-def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_masked, decay_entropy):
+def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, actor_critic_masked, decay_entropy, mask_later):
     if agent == 'PPO':
-        hyperparams = {'batch_size': 64, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
-                       'clip_range': 0.3,
-                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.4,
+        hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
+                       'clip_range': 0.2,
+                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.6,
                        'policy_kwargs': {},
                        }
         if not no_weather:
@@ -120,6 +121,12 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_mask
         hyperparams['policy_kwargs']['net_arch'] = dict(pi=[256, 256], vf=[256, 256])
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
+        if actor_critic_masked > 0:
+            hyperparams['policy_kwargs']['max_non_zero_actions'] = actor_critic_masked
+            if decay_entropy or mask_later:
+                hyperparams['policy_kwargs']['apply_masking'] = False
+            else:
+                hyperparams['policy_kwargs']['apply_masking'] = True
     if agent == 'RPPO':
         hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
                        'clip_range': 0.2,
@@ -135,9 +142,9 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, rppo_mask
         hyperparams['policy_kwargs']['net_arch'] = dict(pi=[256, 256], vf=[256, 256])
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
-        if rppo_masked > 0:
-            hyperparams['policy_kwargs']['max_non_zero_actions'] = rppo_masked
-            if decay_entropy:
+        if actor_critic_masked > 0:
+            hyperparams['policy_kwargs']['max_non_zero_actions'] = actor_critic_masked
+            if decay_entropy or mask_later:
                 hyperparams['policy_kwargs']['apply_masking'] = False
             else:
                 hyperparams['policy_kwargs']['apply_masking'] = True
@@ -178,11 +185,15 @@ def get_json_config(n_steps, crop_features, weather_features, train_years, test_
     )
 
 
-def get_rppo_policy(masked):
-    if masked == 0:
+def get_actor_critic_policy(masked, agent):
+    if masked == 0 and agent == 'RPPO':
         return 'MlpLstmPolicy'
-    elif masked > 0:
+    elif masked == 0 and agent == 'PPO':
+        return 'MlpPolicy'
+    elif masked > 0 and agent == 'RPPO':
         return MaskedRecurrentActorCriticPolicy
+    elif masked > 0 and agent == 'PPO':
+        return MaskedActorCriticPolicy
 
 
 def train(log_dir, n_steps,
@@ -239,8 +250,9 @@ def train(log_dir, n_steps,
     cost_measure = kwargs.get('cost_measure', None)
     measure_all = kwargs.get('measure_all', None)
     n_envs = kwargs.get('n_envs', 4)
-    masked_rppo = kwargs.get('masked_rppo')
+    masked_ac = kwargs.get('masked_ac')
     decay_entropy = kwargs.get('decay_entropy')
+    mask_later = kwargs.get('mask_later')
 
     from stable_baselines3 import PPO, DQN, A2C
     from stable_baselines3.common.monitor import Monitor
@@ -249,7 +261,8 @@ def train(log_dir, n_steps,
     print('Using the StableBaselines3 framework')
     print(f'Train model {pcse_model_name} with {agent} algorithm and seed {seed}. Logdir: {log_dir}')
 
-    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, rppo_masked=masked_rppo, decay_entropy=decay_entropy)
+    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, actor_critic_masked=masked_ac, decay_entropy=decay_entropy,
+                                  mask_later=mask_later)
 
     # TODO register env initialization for robustness
     # register_cropgym_env = register_cropgym_envs()
@@ -275,7 +288,8 @@ def train(log_dir, n_steps,
     if agent == 'PPO':
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
-        model = PPO('MlpPolicy', env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
+        ppo_policy = get_actor_critic_policy(masked_ac, agent)
+        model = PPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
                     tensorboard_log=log_dir, device=device)
     elif agent == 'DQN':
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
@@ -291,7 +305,7 @@ def train(log_dir, n_steps,
         from sb3_contrib import RecurrentPPO
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
-        rppo_policy = get_rppo_policy(masked_rppo)
+        rppo_policy = get_actor_critic_policy(masked_ac, agent)
         model = RecurrentPPO(rppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
                              tensorboard_log=log_dir, device=device)
 
@@ -423,7 +437,7 @@ if __name__ == '__main__':
     # define the crop, weather and (maybe) action features used in training
     crop_features = defaults.get_default_crop_features(pcse_env=args.environment, vision=args.vision)
     weather_features = defaults.get_default_weather_features()
-    action_features = defaults.get_default_action_features()
+    action_features = defaults.get_default_action_features(True)
 
     tag = f'Seed-{args.seed}'
 
@@ -434,7 +448,8 @@ if __name__ == '__main__':
               'loc_code': args.location, 'cost_measure': args.cost_measure, 'start_type': args.start_type,
               'random_init': args.random_init, 'm_multiplier': args.m_multiplier, 'measure_all': args.measure_all,
               'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs, 'vision': args.vision,
-              'masked_rppo': args.masked_rppo, 'decay_entropy': args.decay_entropy, 'nsteps': args.nsteps,}
+              'masked_ac': args.masked_ac, 'decay_entropy': args.decay_entropy, 'nsteps': args.nsteps,
+              'mask_later': args.mask_later,}
 
     if args.decay_entropy:
         print('Training with entropy decay')

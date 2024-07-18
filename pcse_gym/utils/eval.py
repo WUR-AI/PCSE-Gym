@@ -27,6 +27,7 @@ import pcse_gym.utils.defaults as defaults
 from pcse_gym.utils.process_pcse_output import get_dict_lintul_wofost
 from pcse_gym.utils.nitrogen_helpers import get_surplus_n
 from pcse_gym.envs.rewards import calculate_nue
+from pcse_gym.agent.masked_actorcriticpolicy import MaskedActorCriticPolicy, MaskedRecurrentActorCriticPolicy
 from .plotter import plot_variable, plot_var_vs_freq_scatter, get_ylim_dict
 
 
@@ -273,6 +274,12 @@ def evaluate_policy(
             obs, rew, terminated, info = env.step(action)
             episode_starts = terminated
             truncated = info[0].pop("TimeLimit.truncated")
+
+            if (terminated.item() is not False and
+                    (isinstance(policy.policy, MaskedActorCriticPolicy)
+                     or isinstance(policy.policy, MaskedRecurrentActorCriticPolicy))):
+                # print('reset!')
+                policy.policy.reset_non_zero_action_count()
 
             if isinstance(env, VecNormalize):
                 reward = env.get_original_reward()
@@ -581,7 +588,7 @@ class EvalCallback(BaseCallback):
         self.random_weather = kwargs.get('random_weather', False)
         self.multiprocess = multiprocess
         self.n_envs = kwargs.get('n_envs')
-        self.masked_rppo = kwargs.get('masked_rppo')
+        self.masked_ac = kwargs.get('masked_ac')
         self.decay_entropy = kwargs.get('decay_entropy')
         self.total_timesteps = kwargs.get('nsteps')
         self.initial_ent_coef = 1.0
@@ -591,6 +598,7 @@ class EvalCallback(BaseCallback):
         self.apply_after_percentage = 0.5
         self.apply_after_timestep = int(self.apply_after_percentage * self.total_timesteps)
         self.apply_masking = False
+        self.mask_later = kwargs.get('mask_later')
 
         def def_value(): return 0
 
@@ -655,18 +663,19 @@ class EvalCallback(BaseCallback):
         train_location = self.model.get_env().get_attr("loc")[0]
         self.histogram_training_locations[train_location] = self.histogram_training_locations[train_location] + 1
 
-        if self.locals['dones'].item() is not False and self.masked_rppo > 0:
+        if self.masked_ac > 0 and self.num_timesteps >= self.apply_after_timestep:
+            if not self.apply_masking:
+                self.apply_masking = True
+                # Set the policy to apply masking
+                self.model.policy.set_masking(True)
+
+        if self.locals['dones'].item() is not False and self.masked_ac > 0:
             # Reset the non-zero action count in the policy
             # print('reset counter!')
             self.model.policy.reset_non_zero_action_count()
 
         # For decaying of entropy coefficient
         if self.decay_entropy:
-            if self.num_timesteps >= self.apply_after_timestep:
-                if not self.apply_masking:
-                    self.apply_masking = True
-                    # Set the policy to apply masking
-                    self.model.policy.set_masking(True)
 
             progress = self.num_timesteps / self.total_timesteps
 
