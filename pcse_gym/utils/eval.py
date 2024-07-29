@@ -453,11 +453,13 @@ class FindOptimum():
         # for i in range(0, (end_week - start_week)):  # Allow some initial fertilization within the range
         #     if i % 7 == 0:  # Fertilize every 7th week as an initial guess
         #         initial_guess[i] = (bounds[0][1] - bounds[0][0]) / 2  # Midpoint of the bounds
-        # initial_guess = np.array(initial_guess)
+        initial_guess = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.871185299544509, 0.0,
+                                   0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.09953331676244,
+                                   6.763613235646411, 0.0])
         print(f"Start Optimizing constrained episode for year {eval_year} {'limited to 4 actions' if limited is True else ''}!")
 
         start_time = time.time()
-        res = dual_annealing(objective, bounds)
+        res = dual_annealing(objective, bounds, x0=initial_guess)
         # res = differential_evolution(objective, bounds, strategy='best1bin', maxiter=1000, popsize=15, tol=0.01)
         # res = minimize(objective, initial_guess, bounds=bounds, method='L-BFGS-B')
         end_time = time.time()
@@ -796,12 +798,19 @@ class EvalCallback(BaseCallback):
                     result_model[my_key] = episode_infos
                     n_year_loc = 0 if log_training else n_year_loc + 1
             else:
-                avg_rew = mean([x for x in reward.values()])
-                avg_nue = mean([x for x in NUE.values()])
+                nue = [x for x in NUE.values()]
+                rew = [x for x in reward.values()]
+                pass_nue = [1 if 0.5 <= x <= 0.9 else 0 for x in nue]
+                num_rew = len(rew)
+                pass_rew = [1 if x >= 5000 else 0 for x in rew]
+                avg_rew = mean(rew)
+                avg_nue = mean(nue)
                 avg_profit = mean([x for x in profit.values()])
                 avg_wso = mean([x for x in WSO.values()])
                 avg_nsurplus = mean([x for x in Nsurplus.values()])
                 print(f'Evaluation step {self.num_timesteps}\n'
+                      f'Years above 5k rewards {sum(pass_rew)}/{num_rew}\n'
+                      f'Years within N bounds {sum(pass_nue)}/{num_rew}\n'
                       f'Avg. reward: {avg_rew:.4f}\n'
                       f'Avg. profit: {avg_profit:.4f}\n'
                       f'Avg. NUE: {avg_nue:.4f}\n'

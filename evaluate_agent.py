@@ -276,7 +276,7 @@ if __name__ == "__main__":
                 eval_year = [*range(1983, 2022)]
     crop_features = defaults.get_default_crop_features(pcse_env=args.environment, vision=args.vision)
     weather_features = defaults.get_default_weather_features()
-    action_features = defaults.get_default_action_features()
+    action_features = defaults.get_default_action_features(True)
 
     kwargs = {'args_vrr': args.vrr, 'action_limit': args.action_limit, 'noisy_measure': args.noisy_measure,
               'n_budget': args.n_budget, 'framework': args.framework, 'no_weather': args.no_weather,
@@ -341,8 +341,9 @@ if __name__ == "__main__":
                        reward=args.reward,
                        pcse_env=args.environment,
                        nitrogen_levels=nitrogen_levels,
+                       action_features=action_features,
                        **kwargs)
-        cust_objects = {"lr_schedule": lambda x: 0.0001, "clip_range": lambda x: 0.4,
+        cust_objects = {"lr_schedule": lambda x: 0.0001, "clip_range": lambda x: 0.2,
                         "action_space": action_spaces}
         if args.agent in ['PPO', 'RPPO']:
             env = ActionConstrainer(env, action_limit=args.action_limit, n_budget=args.n_budget)
