@@ -204,11 +204,7 @@ class WinterWheat(gym.Env):
         output = self.sb3_env.model.get_output()
 
         # process output to get observation, reward and growth of winterwheat
-        obs, reward, growth = self.process_output(action, output, obs)
-
-        # used for reward functions that rely on rewards at terminate
-        if self.pcse_env:
-            reward, info = self.terminate_reward_signal(output, reward, terminated, info)
+        obs, reward, growth = self.process_output(action, output, obs, terminated)
 
         # normalize observations and reward if not using VecNormalize wrapper
         if self.normalize:
@@ -219,22 +215,18 @@ class WinterWheat(gym.Env):
             self.norm.update_running_rew(reward)
             reward = self.norm.normalize_reward(reward)
 
-        # fill in infos
-        if 'reward' not in info.keys(): info['reward'] = {}
-        info['reward'][self.date] = reward
-        if 'growth' not in info.keys(): info['growth'] = {}
-        info['growth'][self.date] = growth
+        info = self.grab_infos(output, info, reward, growth)
 
         return obs, reward, terminated, truncated, info
 
-    def process_output(self, action, output, obs):
+    def process_output(self, action, output, obs, terminated):
 
         if self.po_features and isinstance(action, np.ndarray) and action.dtype != np.float32:
             measure = None
             if isinstance(action, np.ndarray):
                 action, measure = action[0], action[1:]
             amount = action * self.action_multiplier
-            reward, growth = self.get_reward_and_growth(output, amount)
+            reward, growth = self.get_reward_and_growth(output, amount, terminated)
             obs, cost = self.measure_features.measure_act(obs, measure)
             measurement_cost = sum(cost)
             # if self.reward_function in reward_functions_end() and self.reward_function == 'NUE':
@@ -245,10 +237,10 @@ class WinterWheat(gym.Env):
             if isinstance(action, np.ndarray):
                 action = action.item()
             amount = action * self.action_multiplier
-            reward, growth = self.get_reward_and_growth(output, amount)
+            reward, growth = self.get_reward_and_growth(output, amount, terminated)
             return obs, reward, growth
 
-    def get_reward_and_growth(self, output, amount):
+    def get_reward_and_growth(self, output, amount, terminated):
         output_baseline = []
         if self.reward_function in reward_functions_with_baseline():
             zero_nitrogen_results = self.zero_nitrogen_env_storage.get_episode_output(self.baseline_env)
@@ -266,9 +258,32 @@ class WinterWheat(gym.Env):
                                                          obj=self.reward_container)
         self.rewards_obj.update_profit(output, amount, year=self.sb3_env.date.year,
                                        multiplier=self.sb3_env.multiplier_amount)
+        reward += self.terminate_reward_signal(output, reward, terminated)
         return reward, growth
 
-    def terminate_reward_signal(self, output, reward, terminated, info):
+    def terminate_reward_signal(self, output, reward, terminated):
+        if terminated and self.reward_function in reward_functions_end():
+            reward = self.reward_container.dump_cumulative_positive_reward - abs(reward)
+
+        elif terminated and self.reward_function == 'HAR':
+            reward = self.yield_modifier * self.reward_container.dump_cumulative_positive_reward - abs(reward)
+
+        elif terminated and self.reward_function in ['NUE', 'DNE']:
+            reward = (self.reward_container.calculate_reward_nue(
+                n_fertilized=self.reward_container.get_total_fertilization * 10,
+                n_output=process_pcse.get_n_storage_organ(output),
+                no3_depo=get_no3_deposition_pcse(output),
+                nh4_depo=get_nh4_deposition_pcse(output),)
+            )
+        return reward
+
+    def grab_infos(self, output, info, reward, growth):
+        # fill in infos
+        if 'reward' not in info.keys(): info['reward'] = {}
+        info['reward'][self.date] = reward
+        if 'growth' not in info.keys(): info['growth'] = {}
+        info['growth'][self.date] = growth
+
         if self.pcse_env == 2:
             if 'NUE' not in info.keys():
                 info['NUE'] = {}
@@ -286,32 +301,18 @@ class WinterWheat(gym.Env):
                                                         no3_depo=get_no3_deposition_pcse(output),
                                                         nh4_depo=get_nh4_deposition_pcse(output),)
 
-        if terminated and self.reward_function in reward_functions_end():
-            reward = self.reward_container.dump_cumulative_positive_reward - abs(reward)
-
-        elif terminated and self.reward_function == 'HAR':
-            reward = self.yield_modifier * self.reward_container.dump_cumulative_positive_reward - abs(reward)
-
-        elif terminated and self.reward_function in ['NUE', 'DNE']:
-            reward = (self.reward_container.calculate_reward_nue(
-                n_fertilized=self.reward_container.get_total_fertilization * 10,
-                n_output=process_pcse.get_n_storage_organ(output),
-                no3_depo=get_no3_deposition_pcse(output),
-                nh4_depo=get_nh4_deposition_pcse(output),)
-            )
-
         if 'profit' not in info.keys():
             info['profit'] = {}
         info['profit'][self.date] = self.rewards_obj.profit
 
         # save info of random initial conditions
-        if terminated and self.random_init:
-            if 'init_n' not in info.keys():
-                info['init_n'] = {}
-            info['init_n']['no3'] = self.eval_no3i
-            info['init_n']['nh4'] = self.eval_nh4i
+        # if terminated and self.random_init:
+        #     if 'init_n' not in info.keys():
+        #         info['init_n'] = {}
+        #     info['init_n']['no3'] = self.eval_no3i
+        #     info['init_n']['nh4'] = self.eval_nh4i
 
-        return reward, info
+        return info
 
     def overwrite_year(self, year):
         self.years = year
