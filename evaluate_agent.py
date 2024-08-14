@@ -1,7 +1,7 @@
 import os
 import argparse
 import pickle
-from statistics import mean
+from statistics import mean, median
 
 import numpy as np
 import gymnasium as gym
@@ -117,7 +117,7 @@ def evaluate_treatment(policy, env, n_eval_episodes=1):
             for amount, fert_date in enumerate(fert_dates):
                 if fert_date < date <= fert_date + datetime.timedelta(7):
                     action = fert_amounts[amount] / 10
-                    print(f"fertilized {action} at {fert_date}")
+                    # print(f"fertilized {action} at {fert_date}")
             obs, reward, terminated, truncated, info = env.step(action)
 
             episode_reward += reward
@@ -181,11 +181,6 @@ def evaluate_demeter(env, n_eval_episodes=1, constrained=True):
         episode_infos.append(episode_info)
     return episode_rewards, episode_infos
 
-
-def means_for_progress_bar(m: dict):
-    return mean([x for x in m.values()]) if len(m) > 1 else next(iter(m.values()))
-
-
 def low_n_init() -> dict:
     n_dict = {'NH4I': [0.06181797, 0.33827534, 0.12490669, 0.06109704, 0.06373443, 0.09213926, 0.00802928],
               'NO3I': [2.19391276, 0.33791361, 0.44317362, 0.08596978, 0.65234924, 0.07112439, 0.4655566], }
@@ -194,12 +189,12 @@ def low_n_init() -> dict:
 
 def high_n_init() -> dict:
     n_dict = {'NH4I': [3.15162898, 3.87070563, 1.37766539, 1.17044373, 1.58129878, 0.66062145, 0.18763604],
-              'NO3I': [5.42620968, 16.4380931, 25.73569722, 9.2684839, 1.24005868, 2.94257558, 6.94888184], }
+              'NO3I': [7.42620968, 20.4380931, 29.73569722, 11.2684839, 7.24005868, 7.94257558, 8.94888184], }
     return n_dict
 
 
 def select_init_n_scenario(starting_n):
-    if starting_n == 'hi':
+    if starting_n == 'high':
         return high_n_init()
     elif starting_n == 'low':
         return low_n_init()
@@ -307,7 +302,7 @@ if __name__ == "__main__":
         os.mkdir(os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path))
         checkpoint_folder = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)
 
-    if args.agent in ['PPO', 'RPPO']:
+    if args.agent in ['PPO', 'RPPO', 'MaskedPPO']:
         model_file_to_load = os.listdir(checkpoint_folder)
         model_zip_name = [a for a in model_file_to_load if a.endswith(".zip")][0]
         env_pkl_name = [a for a in model_file_to_load if a.endswith(".pkl")][0]
@@ -345,7 +340,7 @@ if __name__ == "__main__":
                        **kwargs)
         cust_objects = {"lr_schedule": lambda x: 0.0001, "clip_range": lambda x: 0.2,
                         "action_space": action_spaces}
-        if args.agent in ['PPO', 'RPPO']:
+        if args.agent in ['PPO', 'RPPO', 'MaskedPPO']:
             env = ActionConstrainer(env, action_limit=args.action_limit, n_budget=args.n_budget)
             env = DummyVecEnv([lambda: env])
             env = VecNormalize.load(stats_path, env)
@@ -354,12 +349,16 @@ if __name__ == "__main__":
                                           print_system_info=True)
             elif args.agent == 'PPO':
                 agent = PPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
+
+            elif args.agent == 'MaskedPPO':
+                from sb3_contrib import MaskablePPO as MaskedPPO
+                agent = MaskedPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
         policy = agent
 
     evaluate_dir = os.path.join(evaluate_dir, args.checkpoint_path)
     writer = SummaryWriter(log_dir=evaluate_dir)
 
-    reward, fertilizer, result_model, WSO, NUE, profit, Nsurplus, Nloss = {}, {}, {}, {}, {}, {}, {}, {}
+    reward, fertilizer, result_model, WSO, NUE, profit, Nsurplus, Nloss, action_idx = {}, {}, {}, {}, {}, {}, {}, {}, {}
 
     total_eval = len(eval_year) * len(eval_locations)
     print("evaluating environment with learned policy...")
@@ -369,7 +368,7 @@ if __name__ == "__main__":
             years_bar.set_description(f'Evaluating {year}, {str(test_location): <{10}} | '
                                       f'{str(il + (len(eval_locations) * iy)): <{3}}/{total_eval}')
             if args.framework == 'sb3':
-                if isinstance(agent, PPO) or isinstance(agent, RecurrentPPO):
+                if isinstance(agent, PPO) or isinstance(agent, RecurrentPPO) or isinstance(agent, MaskedPPO):
                     env.env_method('overwrite_year', year)
                     env.env_method('overwrite_location', test_location)
                     env.env_method('reset', options=select_init_n_scenario(init_n))
@@ -397,6 +396,7 @@ if __name__ == "__main__":
             NUE[my_key] = list(episode_infos[0]['NUE'].values())[-1]
             Nsurplus[my_key] = list(episode_infos[0]['Nsurplus'].values())[-1]
             Nloss[my_key] = list(episode_infos[0]['NLOSSCUM'].values())[-1]
+            action_idx[my_key] = np.where(np.array(list(episode_infos[0]['action'].values())) > 0)[0]
             if args.framework == 'sb3':
                 if isinstance(env, VecEnv):
                     if env.unwrapped.envs[0].unwrapped.po_features:
@@ -413,16 +413,35 @@ if __name__ == "__main__":
             writer.add_scalar(f'eval/Nsurplus-{my_key}', Nsurplus[my_key])
             result_model[my_key] = episode_infos
     else:
-        avg_rew = means_for_progress_bar(reward)
-        avg_nue = means_for_progress_bar(NUE)
-        avg_profit = means_for_progress_bar(profit)
-        avg_wso = means_for_progress_bar(WSO)
-        avg_nsurplus = means_for_progress_bar(Nsurplus)
-        print(f'Avg. reward: {avg_rew:.4f}\n'
+        avg_rew = eval.means_for_progress_bar(reward)
+        avg_nue = eval.means_for_progress_bar(NUE)
+        avg_profit = eval.means_for_progress_bar(profit)
+        avg_wso = eval.means_for_progress_bar(WSO)
+        avg_nsurplus = eval.means_for_progress_bar(Nsurplus)
+        med_rew = eval.medians_for_progress_bar(reward)
+        med_nue = eval.medians_for_progress_bar(NUE)
+        med_profit = eval.medians_for_progress_bar(profit)
+        med_wso = eval.medians_for_progress_bar(WSO)
+        med_nsurplus = eval.medians_for_progress_bar(Nsurplus)
+        nue = [x for x in NUE.values()]
+        nsurp = [x for x in Nsurplus.values()]
+        pass_nue = [1 if 0.5 <= x <= 0.9 else 0 for x in nue]
+        pass_nsurp = [1 if 0 < x <= 40 else 0 for x in nsurp]
+        length = len(nue)
+        acts = list({item for sublist in list(action_idx.values()) for item in sublist})
+        print(f'Within NUE: {sum(pass_nue)}/{length}\n'
+              f'Within Nsurplus: {sum(pass_nsurp)}/{length}\n'
+              f'Med. reward: {med_rew:.4f}\n'
+              f'Med. profit: {med_profit:.4f}\n'
+              f'Med. NUE: {med_nue:.4f}\n'
+              f'Med. WSO: {med_wso:.4f}\n'
+              f'Med. Nsurplus: {med_nsurplus:.4f}\n'
+              f'Avg. reward: {avg_rew:.4f}\n'
               f'Avg. profit: {avg_profit:.4f}\n'
               f'Avg. NUE: {avg_nue:.4f}\n'
               f'Avg. WSO: {avg_wso:.4f}\n'
-              f'Avg. Nsurplus: {avg_nsurplus:.4f}\n')
+              f'Avg. Nsurplus: {avg_nsurplus:.4f}\n'
+              f'Action weeks: {acts}')
 
     # #measuring history
     # for year in eval_year:

@@ -22,6 +22,20 @@ def reward_functions_end():
     return ['END', 'ENY']
 
 
+def get_min_yield(loc="52.57-5.63"):
+    if loc == "52.57-5.63":
+        return 5484.75
+    else:
+        return 5484.75
+
+
+def get_max_yield(loc="52.57-5.63"):
+    if loc == "52.57-5.63":
+        return 9500
+    else:
+        return 9500
+
+
 class Rewards:
     def __init__(self, reward_var, timestep, costs_nitrogen=10.0, vrr=0.7, with_year=False):
         self.reward_var = reward_var
@@ -482,7 +496,7 @@ class Rewards:
                 n_surplus = get_surplus_n(n_fertilized, n_output, year=year, start=start, end=end)
             end_yield = super().dump_cumulative_positive_reward
 
-            return self.n_surplus_condition(n_surplus, self.nue_condition(nue)) * end_yield
+            return self.formula_nue(n_surplus, nue, end_yield)
 
         def calculate_reward_nue_simple(self, n_input, n_output, year=None, start=None, end=None):
             nue = calculate_nue(n_input, n_output, year=year, start=start, end=end)
@@ -510,7 +524,7 @@ class Rewards:
                 return upper_bound * np.exp(-10 * (b - upper_bound)) + 0.1
 
         @staticmethod
-        def nue_condition_simple(b, lower_bound=0.7, upper_bound=0.85):
+        def nue_condition_simple(b, lower_bound=0.5, upper_bound=0.9):
             """
             For NUE reward, coefficient indicating how close the NUE in the range of lower_bound-upper_bound
             """
@@ -527,6 +541,48 @@ class Rewards:
                 return 1
             else:
                 return 0
+
+        @staticmethod
+        def n_surplus_condition_linear(b, c, t=40):
+            if c == 1:
+                if 0 < b <= 40:
+                    return 1
+                elif 40 < b <= 40 + t:
+                    return 1 - (b - 40) / t
+                elif -t < b <= 0:
+                    return 1 + (b / t)
+            return 0
+
+        @staticmethod
+        def nue_formula(nue, nue_width=0.3):
+            base_nue = max(0, min(1, 1 - (abs(nue - 0.7) - 0.2) / nue_width))
+            return base_nue
+
+        @staticmethod
+        def n_surplus_penalty(nsurplus, reduction=100):
+            if 0 < nsurplus <= 40:
+                return 0
+            else:
+                return reduction * min(abs(nsurplus), abs(nsurplus - 40))
+
+        @staticmethod
+        def n_surplus_formula(n_surplus, nue, nsurp_width=100, nue_width=1):
+            base_nsurp = max(0, min(1, 1 - (abs(n_surplus - 20) - 20) / nsurp_width))
+            base_nue = max(0, min(1, 1 - (abs(nue - 0.7) - 0.2) / nue_width))
+            return base_nsurp * base_nue
+
+        @staticmethod
+        def normalize_yield(y, maxy=get_max_yield(), miny=get_min_yield()):
+            return max(0, (y - miny) / (maxy - miny))
+
+        @staticmethod
+        def include_yield_req(req, y):
+            return y if req == 1 else 0
+
+        def formula_nue(self, n_surplus, nue, end_yield):
+            nsurp_value = self.n_surplus_formula(n_surplus, nue)
+            normalized_yield = self.normalize_yield(end_yield)
+            return nsurp_value + self.include_yield_req(nsurp_value, normalized_yield)
 
         def reset(self):
             super().reset()

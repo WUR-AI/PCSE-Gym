@@ -15,10 +15,10 @@ def get_action_space(nitrogen_levels=7, po_features=[]):
 
 def initialize_env(pcse_env=1, po_features=[],
                    crop_features=defaults.get_default_crop_features(pcse_env=1, vision='None'),
-                   costs_nitrogen=10, reward='NUE', nitrogen_levels=9, action_multiplier=1.0, add_random=False,
+                   action_features=defaults.get_default_action_features(True), costs_nitrogen=10, reward='NUE', nitrogen_levels=9, action_multiplier=1.0, add_random=False,
                    years=defaults.get_default_train_years(), locations=defaults.get_default_location(), args_vrr=False,
                    action_limit=0, noisy_measure=False, n_budget=0, no_weather=False, framework='sb3',
-                   mask_binary=False, random_weather=False,
+                   mask_binary=False, random_weather=False, weather_features=defaults.get_default_weather_features(),
                    placeholder_val=-1.11, normalize=False, loc_code='NL', cost_measure='real', start_type='sowing',
                    random_init=False, m_multiplier=1, measure_all=False, seed=None):
     if add_random:
@@ -31,6 +31,8 @@ def initialize_env(pcse_env=1, po_features=[],
                   measure_all=measure_all, random_weather=random_weather,)
     if framework == 'sb3':
         env_return = WinterWheat(crop_features=crop_features,
+                                 action_features=action_features,
+                                 weather_features=weather_features,
                                  costs_nitrogen=costs_nitrogen,
                                  years=years,
                                  locations=locations,

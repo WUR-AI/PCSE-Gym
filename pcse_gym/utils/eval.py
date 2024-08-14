@@ -22,12 +22,21 @@ from stable_baselines3.common.logger import Figure
 from stable_baselines3.common.distributions import MultiCategoricalDistribution
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 from sb3_contrib import RecurrentPPO
+from sb3_contrib import MaskablePPO as MaskedPPO
 import pcse_gym.utils.defaults as defaults
 from pcse_gym.utils.process_pcse_output import get_dict_lintul_wofost
 from pcse_gym.utils.nitrogen_helpers import get_surplus_n
 from pcse_gym.envs.rewards import calculate_nue
 from pcse_gym.agent.masked_actorcriticpolicy import MaskedActorCriticPolicy, MaskedRecurrentActorCriticPolicy
 from .plotter import plot_variable, plot_var_vs_freq_scatter, get_ylim_dict
+
+
+def means_for_progress_bar(m: dict):
+    return mean([x for x in m.values()]) if len(m) > 1 else next(iter(m.values()))
+
+
+def medians_for_progress_bar(m: dict):
+    return median([x for x in m.values()]) if len(m) > 1 else next(iter(m.values()))
 
 
 def compute_median(results_dict: dict, filter_list=None):
@@ -228,6 +237,29 @@ def evaluate_policy(
                         sb_val = sb_values.detach().item()
                     prob = sb_prob
                     val = sb_val
+                if isinstance(policy, MaskedPPO):
+                    action_masks = get_action_masks(env)
+                    action, state = policy.predict(
+                        obs,
+                        state=state,
+                        episode_start=episode_starts,
+                        deterministic=deterministic,
+                        action_masks=action_masks,
+                    )
+                    # print(f'action {action}, action_masks {action_masks} in step {env.get_attr("n_steps")}')
+
+                    if 'cuda' in device:
+                        sb_actions, sb_values, sb_log_probs = policy.policy(torch.from_numpy(obs).to(device),
+                                                                            deterministic=deterministic)
+                        sb_prob = np.exp(sb_log_probs.detach().cpu().numpy()).item()
+                        sb_val = sb_values.detach().cpu().item()
+                    else:
+                        sb_actions, sb_values, sb_log_probs = policy.policy(torch.from_numpy(obs),
+                                                                            deterministic=deterministic)
+                        sb_prob = np.exp(sb_log_probs.detach().numpy()).item()
+                        sb_val = sb_values.detach().item()
+                    prob = sb_prob
+                    val = sb_val
                 if isinstance(policy, A2C):
                     action, state = policy.predict(obs, state=state, episode_start=episode_starts,
                                                    deterministic=deterministic)
@@ -325,6 +357,20 @@ def evaluate_policy(
     if isinstance(policy, base_class.BaseAlgorithm) and policy.get_env() is not None:
         policy.get_env().training = training
     return episode_rewards, episode_infos
+
+
+def get_action_masks(env) -> np.ndarray:
+    """
+    Checks whether gym env exposes a method returning invalid action masks
+
+    :param env: the Gym environment to get masks from
+    :return: A numpy array of the masks
+    """
+
+    if isinstance(env, VecEnv):
+        return np.stack(env.env_method('action_masks'))
+    else:
+        return getattr(env, 'action_masks')()
 
 
 class FindOptimum():
@@ -574,6 +620,7 @@ class EvalCallback(BaseCallback):
                  test_years=defaults.get_default_test_years(),
                  train_locations=defaults.get_default_location(), test_locations=defaults.get_default_location(),
                  n_eval_episodes=1, eval_freq=20_000, pcse_model=1, seed=0, comet_experiment=None, multiprocess=False,
+                 irs_method=None,
                  **kwargs):
         super(EvalCallback, self).__init__()
         self.test_years = test_years
@@ -601,6 +648,8 @@ class EvalCallback(BaseCallback):
         self.apply_after_timestep = int(self.apply_after_percentage * self.total_timesteps)
         self.apply_masking = False
         self.mask_later = kwargs.get('mask_later')
+        self.irs = irs_method
+        self.buffer = None
 
         def def_value(): return 0
 
@@ -609,6 +658,10 @@ class EvalCallback(BaseCallback):
         def def_value(): return 0
 
         self.histogram_training_locations = defaultdict(def_value)
+
+    def init_callback(self, model) -> None:
+        super().init_callback(model)
+        self.buffer = self.model.rollout_buffer
 
     @staticmethod
     def check_year_combination(year, loc):
@@ -671,10 +724,15 @@ class EvalCallback(BaseCallback):
                 # Set the policy to apply masking
                 self.model.policy.set_masking(True)
 
-        if self.locals['dones'].item() is not False and self.masked_ac > 0:
-            # Reset the non-zero action count in the policy
-            # print('reset counter!')
-            self.model.policy.reset_non_zero_action_count()
+        if self.masked_ac > 0:
+            if self.multiprocess:
+                # print(self.locals['dones'])
+                if np.all(self.locals['dones']):
+                    # print(f'reset counter for action masks')
+                    self.model.policy.reset_non_zero_action_count()
+            else:
+                if self.locals['dones'].item():
+                    self.model.policy.reset_non_zero_action_count()
 
         # For decaying of entropy coefficient
         if self.decay_entropy:
@@ -685,6 +743,18 @@ class EvalCallback(BaseCallback):
                 # Linear annealing
                 fraction = (progress - self.anneal_start_fraction) / (self.anneal_end_fraction - self.anneal_start_fraction)
                 self.model.ent_coef = self.initial_ent_coef + fraction * (self.final_ent_coef - self.initial_ent_coef)
+
+        if self.irs is not None:
+            observations = self.locals["obs_tensor"]
+            device = observations.device
+            actions = torch.as_tensor(self.locals["actions"], device=device)
+            rewards = torch.as_tensor(self.locals["rewards"], device=device)
+            dones = torch.as_tensor(self.locals["dones"], device=device)
+            next_observations = torch.as_tensor(self.locals["new_obs"], device=device)
+
+            # ===================== watch the interaction ===================== #
+            self.irs.watch(observations, actions, rewards, dones, dones, next_observations)
+            # ===================== watch the interaction ===================== #
 
         '''Evaluate episodes with learned policy and log it in tensorboard'''
         if self.n_calls % self.eval_freq == 0 or self.n_calls == 1:
@@ -751,8 +821,8 @@ class EvalCallback(BaseCallback):
             ax.set_xticklabels(list(self.histogram_training_locations.keys()), fontdict=None, minor=False)
             self.logger.record(f'figures/training-locations', Figure(fig, close=True))
 
-            reward, fertilizer, result_model, WSO, NUE, Nsurplus, profit, init_no3, init_nh4 = (
-                {}, {}, {}, {}, {}, {}, {}, {}, {})
+            reward, fertilizer, result_model, WSO, NUE, Nsurplus, profit, init_no3, init_nh4, action_idx = (
+                {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
             log_training = self.get_do_log_training()
 
             print("evaluating environment with learned policy...")
@@ -785,6 +855,7 @@ class EvalCallback(BaseCallback):
                     # years_bar.set_description(f'Reward {year}, {str(test_location): <{12}}: {reward[my_key]}')
                     if self.po_features:
                         episode_infos = get_measure_graphs(episode_infos)
+                    action_idx[my_key] = np.where(np.array(list(episode_infos[0]['action'].values())) > 0)[0]
                     fertilizer[my_key] = sum(episode_infos[0]['fertilizer'].values())
                     WSO[my_key] = list(episode_infos[0]['WSO'].values())[-1]
                     profit[my_key] = list(episode_infos[0]['profit'].values())[-1]
@@ -798,24 +869,35 @@ class EvalCallback(BaseCallback):
                     result_model[my_key] = episode_infos
                     n_year_loc = 0 if log_training else n_year_loc + 1
             else:
+                avg_rew = means_for_progress_bar(reward)
+                avg_nue = means_for_progress_bar(NUE)
+                avg_profit = means_for_progress_bar(profit)
+                avg_wso = means_for_progress_bar(WSO)
+                avg_nsurplus = means_for_progress_bar(Nsurplus)
+                med_rew = medians_for_progress_bar(reward)
+                med_nue = medians_for_progress_bar(NUE)
+                med_profit = medians_for_progress_bar(profit)
+                med_wso = medians_for_progress_bar(WSO)
+                med_nsurplus = medians_for_progress_bar(Nsurplus)
                 nue = [x for x in NUE.values()]
-                rew = [x for x in reward.values()]
+                nsurp = [x for x in Nsurplus.values()]
+                acts = list({item for sublist in list(action_idx.values()) for item in sublist})
                 pass_nue = [1 if 0.5 <= x <= 0.9 else 0 for x in nue]
-                num_rew = len(rew)
-                pass_rew = [1 if x >= 5000 else 0 for x in rew]
-                avg_rew = mean(rew)
-                avg_nue = mean(nue)
-                avg_profit = mean([x for x in profit.values()])
-                avg_wso = mean([x for x in WSO.values()])
-                avg_nsurplus = mean([x for x in Nsurplus.values()])
-                print(f'Evaluation step {self.num_timesteps}\n'
-                      f'Years above 5k rewards {sum(pass_rew)}/{num_rew}\n'
-                      f'Years within N bounds {sum(pass_nue)}/{num_rew}\n'
+                pass_nsurp = [1 if 0 < x <= 40 else 0 for x in nsurp]
+                length = len(nue)
+                print(f'Within NUE: {sum(pass_nue)}/{length}\n'
+                      f'Within Nsurplus: {sum(pass_nsurp)}/{length}\n'
+                      f'Med. reward: {med_rew:.4f}\n'
+                      f'Med. profit: {med_profit:.4f}\n'
+                      f'Med. NUE: {med_nue:.4f}\n'
+                      f'Med. WSO: {med_wso:.4f}\n'
+                      f'Med. Nsurplus: {med_nsurplus:.4f}\n'
                       f'Avg. reward: {avg_rew:.4f}\n'
                       f'Avg. profit: {avg_profit:.4f}\n'
                       f'Avg. NUE: {avg_nue:.4f}\n'
                       f'Avg. WSO: {avg_wso:.4f}\n'
-                      f'Avg. Nsurplus: {avg_nsurplus:.4f}\n')
+                      f'Avg. Nsurplus: {avg_nsurplus:.4f}\n'
+                      f'Action weeks: {acts}')
 
             for test_location in list(set(self.test_locations)):
                 test_keys = [(a, test_location) for a in self.test_years]
@@ -887,8 +969,9 @@ class EvalCallback(BaseCallback):
 
             # pickle info for creating figures
             dir_log = self.logger.get_dir()
-            with open(os.path.join(dir_log, f'infos_{self.num_timesteps}.pkl'), 'wb') as f:
-                pickle.dump(results_figure, f)
+            if self.total_timesteps == self.num_timesteps:
+                with open(os.path.join(dir_log, f'infos_{self.num_timesteps}.pkl'), 'wb') as f:
+                    pickle.dump(results_figure, f)
 
             # if using comet, log pickle file and model as asset
             if self.comet_experiment:
@@ -898,9 +981,10 @@ class EvalCallback(BaseCallback):
                 model_files = [(file, int(file.split('-')[1].split('.')[0])) for file in list_dir if file.startswith('model-') and file.endswith("zip")]
                 max_model_file = max(model_files, key=lambda x: x[1])
                 latest_model_step = max_model_file[1]
-                self.comet_experiment.log_asset(file_data=os.path.join(dir_log, f'infos_{self.num_timesteps}.pkl'),
-                                                step=self.num_timesteps,
-                                                file_name=f'infos_{self.num_timesteps}')
+                if self.total_timesteps == self.num_timesteps:
+                    self.comet_experiment.log_asset(file_data=os.path.join(dir_log, f'infos_{self.num_timesteps}.pkl'),
+                                                    step=self.num_timesteps,
+                                                    file_name=f'infos_{self.num_timesteps}')
                 self.comet_experiment.log_asset(file_data=os.path.join(dir_log, f'env-{latest_model_step}.pkl'),
                                                 step=self.num_timesteps,
                                                 file_name=f'env-{latest_model_step}')
@@ -931,6 +1015,31 @@ class EvalCallback(BaseCallback):
             self.logger.dump(step=self.num_timesteps)
 
         return True
+
+    def _on_rollout_end(self) -> None:
+        # ===================== compute the intrinsic rewards ===================== #
+        # prepare the data samples
+        if self.irs is not None:
+            obs = torch.as_tensor(self.buffer.observations)
+            # get the new observations
+            new_obs = obs.clone()
+            new_obs[:-1] = obs[1:]
+            new_obs[-1] = torch.as_tensor(self.locals["new_obs"])
+            actions = torch.as_tensor(self.buffer.actions)
+            rewards = torch.as_tensor(self.buffer.rewards)
+            dones = torch.as_tensor(self.buffer.episode_starts)
+            # print(obs.shape, actions.shape, rewards.shape, dones.shape, obs.shape)
+            # compute the intrinsic rewards
+            intrinsic_rewards = self.irs.compute(
+                samples=dict(observations=obs, actions=actions,
+                             rewards=rewards, terminateds=dones,
+                             truncateds=dones, next_observations=new_obs),
+                sync=True)
+            # add the intrinsic rewards to the buffer
+            self.buffer.advantages += intrinsic_rewards.cpu().numpy()
+            self.buffer.returns += intrinsic_rewards.cpu().numpy()
+            # print(f'Intrinsic reward in step {self.num_timesteps} is {intrinsic_rewards.cpu().numpy()}')
+            # ===================== compute the intrinsic rewards ===================== #
 
 
 class CometCallback(EvalCallback):

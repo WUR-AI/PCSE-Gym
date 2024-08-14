@@ -22,6 +22,7 @@ from pcse_gym.utils.eval import EvalCallback, determine_and_log_optimum
 from pcse_gym.utils.normalization import VecNormalizePO
 import pcse_gym.utils.defaults as defaults
 from pcse_gym.agent.masked_actorcriticpolicy import MaskedRecurrentActorCriticPolicy, MaskedActorCriticPolicy
+from pcse_gym.agent.ppo_mod import RegPPO
 
 path_to_program = lib_programname.get_path_executed_script()
 rootdir = path_to_program.parents[0]
@@ -80,6 +81,9 @@ def args_func(parser):
     parser.add_argument("--masked-ac", type=int, default=0, dest='masked_ac')
     parser.add_argument("--decay-entropy", action='store_true', default=False, dest='decay_entropy')
     parser.add_argument("--mask-later", action='store_true', default=False, dest='mask_later')
+    parser.add_argument("--regl2", type=float, default=0.0, dest='regl2')
+    parser.add_argument("--regl1", type=float, default=0.0, dest='regl1')
+    parser.add_argument("--irs", type=str, default=None, dest='irs')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
@@ -106,21 +110,23 @@ def wrapper_vectorized_env(env_pcse_train, flag_po, flag_eval=False, multiproc=F
 
 
 def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, actor_critic_masked, decay_entropy, mask_later):
-    if agent == 'PPO':
-        hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
+    if agent == 'PPO' or agent == 'MaskedPPO':
+        hyperparams = {'batch_size': 256, 'n_steps': 2048, 'learning_rate': 0.0005,
+                       'ent_coef': 1.0 if decay_entropy else 0.15,
                        'clip_range': 0.2,
-                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.6,
+                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.5,
                        'policy_kwargs': {},
                        }
-        if not no_weather:
-            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
-                                                             n_weather_features=len(weather_features),
-                                                             n_action_features=len(action_features),
-                                                             n_po_features=len(po_features) if flag_po else 0,
-                                                             mask_binary=mask_binary)
+        # if not no_weather:
+        #     hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
+        #                                                      n_weather_features=len(weather_features),
+        #                                                      n_action_features=len(action_features),
+        #                                                      n_po_features=len(po_features) if flag_po else 0,
+        #                                                      mask_binary=mask_binary)
         hyperparams['policy_kwargs']['net_arch'] = dict(pi=[256, 256], vf=[256, 256])
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
+        hyperparams['policy_kwargs']['share_features_extractor'] = False
         if actor_critic_masked > 0:
             hyperparams['policy_kwargs']['max_non_zero_actions'] = actor_critic_masked
             if decay_entropy or mask_later:
@@ -128,9 +134,10 @@ def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, actor_cri
             else:
                 hyperparams['policy_kwargs']['apply_masking'] = True
     if agent == 'RPPO':
-        hyperparams = {'batch_size': 128, 'n_steps': 2048, 'learning_rate': 0.0002, 'ent_coef': 1.0 if decay_entropy else 0.0,
-                       'clip_range': 0.2,
-                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.4,
+        hyperparams = {'batch_size': 256, 'n_steps': 2048, 'learning_rate': 0.00001,
+                       'ent_coef': 1.0 if decay_entropy else 0.0,
+                       'clip_range': 0.15,
+                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.6,
                        'policy_kwargs': {},
                        }
         if not no_weather:
@@ -253,6 +260,9 @@ def train(log_dir, n_steps,
     masked_ac = kwargs.get('masked_ac')
     decay_entropy = kwargs.get('decay_entropy')
     mask_later = kwargs.get('mask_later')
+    regl2 = kwargs.get('regl2')
+    regl1 = kwargs.get('regl1')
+    irs = kwargs.get('irs')
 
     from stable_baselines3 import PPO, DQN, A2C
     from stable_baselines3.common.monitor import Monitor
@@ -261,7 +271,8 @@ def train(log_dir, n_steps,
     print('Using the StableBaselines3 framework')
     print(f'Train model {pcse_model_name} with {agent} algorithm and seed {seed}. Logdir: {log_dir}')
 
-    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, actor_critic_masked=masked_ac, decay_entropy=decay_entropy,
+    hyperparams = get_hyperparams(agent, pcse_model, no_weather, flag_po, mask_binary, actor_critic_masked=masked_ac,
+                                  decay_entropy=decay_entropy,
                                   mask_later=mask_later)
 
     # TODO register env initialization for robustness
@@ -289,8 +300,13 @@ def train(log_dir, n_steps,
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
         ppo_policy = get_actor_critic_policy(masked_ac, agent)
-        model = PPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
-                    tensorboard_log=log_dir, device=device)
+        if regl2 > 0 or regl1 > 0:
+            model = RegPPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
+                           tensorboard_log=log_dir, device=device, l2_coef=regl2, l1_coef=regl1)
+            print('Using Regularized PPO!')
+        else:
+            model = PPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
+                        tensorboard_log=log_dir, device=device)
     elif agent == 'DQN':
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
@@ -308,6 +324,26 @@ def train(log_dir, n_steps,
         rppo_policy = get_actor_critic_policy(masked_ac, agent)
         model = RecurrentPPO(rppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
                              tensorboard_log=log_dir, device=device)
+    elif agent == 'MaskedPPO':
+        from sb3_contrib import MaskablePPO as MaskedPPO
+        env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
+                                                multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
+        # policy = get_actor_critic_policy(masked_ac, agent)
+        print('Using MaskedPPO!')
+        model = MaskedPPO('MlpPolicy', env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
+                             tensorboard_log=log_dir, device=device)
+
+    irs_method = None
+    if irs is not None:
+        from rllte.xplore.reward import E3B, ICM, RIDE
+
+        if irs == 'E3B':
+            irs_method = E3B(envs=env_pcse_train, device=device, latent_dim=128)
+        elif irs == 'ICM':
+            irs_method = ICM(envs=env_pcse_train, device=device, latent_dim=256)
+        elif irs == 'RIDE':
+            irs_method = RIDE(envs=env_pcse_train, device=device)
+        print(f"Using {irs} for intrinsic rewards!")
 
     # wrap comet after VecEnvs
     comet_log = None
@@ -374,6 +410,7 @@ def train(log_dir, n_steps,
                                       train_years=train_years, train_locations=train_locations,
                                       test_locations=test_locations, seed=seed, pcse_model=pcse_model,
                                       comet_experiment=comet_log, multiprocess=multiprocess, eval_freq=eval_freq,
+                                      irs_method=irs_method,
                                       **kwargs),
                 tb_log_name=tb_log_name)
 
@@ -384,15 +421,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = args_func(parser)
 
-    # making sure everything is compatible with the user choices
-    if not args.measure and args.noisy_measure:
-        parser.error("noisy measure should be used with measure")
-    if args.agent not in ['PPO', 'A2C', 'RPPO', 'DQN', 'GRU', 'PosMLP', 'S4D', 'IndRNN', 'DiffNC', 'ATM']:
-        parser.error("Invalid agent argument. Please choose PPO, A2C, RPPO, GRU, IndRNN, DiffNC, PosMLP, ATM, DQN")
-    if args.agent in ['GRU', 'PosMLP', 'S4D', 'IndRNN', 'DiffNC']:
-        args.framework = 'rllib'
-    elif args.agent in ['ATM']:
-        args.framework = 'ACNO-MDP'
+    # # making sure everything is compatible with the user choices
+    # if not args.measure and args.noisy_measure:
+    #     parser.error("noisy measure should be used with measure")
+    # if args.agent not in ['PPO', 'A2C', 'RPPO', 'DQN', 'GRU', 'PosMLP', 'S4D', 'IndRNN', 'DiffNC', 'ATM']:
+    #     parser.error("Invalid agent argument. Please choose PPO, A2C, RPPO, GRU, IndRNN, DiffNC, PosMLP, ATM, DQN")
+    # if args.agent in ['GRU', 'PosMLP', 'S4D', 'IndRNN', 'DiffNC']:
+    #     args.framework = 'rllib'
+    # elif args.agent in ['ATM']:
+    #     args.framework = 'ACNO-MDP'
     pcse_model_name = "LINTUL" if not args.environment else "WOFOST"
 
     # directory where the model is saved
@@ -449,7 +486,7 @@ if __name__ == '__main__':
               'random_init': args.random_init, 'm_multiplier': args.m_multiplier, 'measure_all': args.measure_all,
               'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs, 'vision': args.vision,
               'masked_ac': args.masked_ac, 'decay_entropy': args.decay_entropy, 'nsteps': args.nsteps,
-              'mask_later': args.mask_later,}
+              'mask_later': args.mask_later, 'regl2': args.regl2, 'regl1': args.regl1, 'irs': args.irs}
 
     if args.decay_entropy:
         print('Training with entropy decay')

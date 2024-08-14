@@ -59,6 +59,19 @@ class WinterWheat(gym.Env):
         self.eval_no3i = None
         self.list_n_i = [self.eval_nh4i, self.eval_no3i]
         self.rng, self.seed = gym.utils.seeding.np_random(seed=seed)
+        self.masked_ac = kwargs.get('masked_ac', 0)
+
+        """Masking variables"""
+        self.n_steps = 0
+        # Non Zero constraint
+        self.non_zero_action_count = 0
+        self.max_non_zero_actions = 4
+        # Consecutive constraint
+        self.mask_duration = 3
+        self.consecutive_mask_counter = 0
+        # Week constraint
+        self.start_actions = 5
+        self.end_actions = 30
 
         """LINTUL or WOFOST"""
         if 'Lintul' in kwargs.get('model_config'):
@@ -199,6 +212,9 @@ class WinterWheat(gym.Env):
 
         # advance one step of the PCSEEngine wrapper and apply action(s)
         obs, _, terminated, truncated, info = self.sb3_env.step(action)
+
+        # Only relevant for invalid action masking
+        self.update_non_zero_action_count(action)
 
         # grab output of PCSE
         output = self.sb3_env.model.get_output()
@@ -418,6 +434,10 @@ class WinterWheat(gym.Env):
         return site_params
 
     def reset(self, seed=None, options=None, **kwargs):
+
+        # Only for invalid action masking
+        self.reset_non_zero_action_count()
+
         if isinstance(options, dict):
             site_params = options
         else:
@@ -447,6 +467,31 @@ class WinterWheat(gym.Env):
             obs = self.norm.normalize_measure_obs(obs, None)
 
         return obs, info
+
+    def action_masks(self):
+        assert isinstance(self.action_space, gym.spaces.Discrete)
+        if (self.non_zero_action_count >= self.max_non_zero_actions or
+            self.consecutive_mask_counter > 0 or
+            self.n_steps < self.start_actions or
+            self.n_steps >= self.end_actions):
+            mask = [False for _ in range(self.action_space.n)]
+            mask[0] = True
+            return mask
+        else:
+            return [True for _ in range(self.action_space.n)]
+
+    def reset_non_zero_action_count(self):
+        self.non_zero_action_count = 0
+        self.consecutive_mask_counter = 0
+        self.n_steps = 0
+
+    def update_non_zero_action_count(self, actions):
+        self.n_steps += 1
+        if np.any(actions != 0):
+            self.non_zero_action_count += np.sum(actions != 0).item()
+            self.consecutive_mask_counter = self.mask_duration
+        elif self.consecutive_mask_counter > 0:
+            self.consecutive_mask_counter -= 1
 
     def render(self, mode="human"):
         pass
