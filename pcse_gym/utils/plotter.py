@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 from collections import defaultdict
 import datetime
+from mpl_toolkits.mplot3d import Axes3D
+
+import pcse_gym.initialize_envs
 
 
 def get_cumulative_variables():
@@ -530,6 +533,7 @@ def plot_nue_template(show_graph_labels=False, size=(10, 8), max=300) -> plt:
 
     return plt
 
+
 def plot_fertilization_schedule(fertilization_policies, growth):
     import matplotlib.dates as mdates
 
@@ -568,4 +572,71 @@ def plot_fertilization_schedule(fertilization_policies, growth):
     # plt.grid(True)
     plt.tight_layout()
     plt.legend(loc='lower right')
+    plt.show()
+
+
+def plot_3d_reward_function(env=False):
+    import pcse_gym.envs.rewards as rew
+    import matplotlib.cm as cm
+
+    def cgm(env, weeks, n_levels):
+        env.reset()
+        reward = 0
+        weeks = int(weeks)
+        for _ in range(weeks):
+            _, _, term, _, info = env.step(0)
+        else:
+            _, _, term, _, info = env.step(n_levels*3)
+
+        while not term:
+            _, reward, term, _, info = env.step(0)
+
+        return reward
+
+    cont = rew.Rewards.ContainerNUE(timestep=7)
+
+    # Generate data for plotting
+
+    if env:
+        env = pcse_gym.initialize_envs.initialize_env(reward='NUE',
+                                                      years=[1984],
+                                                      random_weather=True,
+                                                      weather_features=["IRRAD", "TMIN", "RAIN"],
+                                                      crop_features=["DVS", "TAGP", "LAI", "SM"],
+                                                      nitrogen_levels=9,
+                                                      pcse_env=2,
+                                                      locations=[(52.57, 5.63)],
+                                                      action_features=["action_history"])
+
+        week = np.linspace(0, 45, 46)
+        n_lev = np.arange(1, 10)
+
+        B, C = np.meshgrid(week, n_lev)
+        Z = np.array([[cgm(env, w, n) for w in week] for n in n_lev])
+    else:
+        b_values = np.linspace(-100, 140, 100)
+        c_values = np.linspace(0, 1, 100)
+        B, C = np.meshgrid(b_values, c_values)
+        Z = np.array([[cont.n_surplus_formula(b, c) for b in b_values] for c in c_values])
+
+
+    # Create a 3D plot
+    fig = plt.figure(figsize=(14, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    surf = ax.plot_surface(B, C, Z, cmap='viridis')
+
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
+    cbar.set_label('Reward')
+
+    if env:
+        ax.set_xlabel('Week of fertilization')
+        ax.set_ylabel('Fertilization Level')
+        ax.set_zlabel('env(N_surplus, NUE)')
+        ax.set_title('3D Plot of NUE reward function in year 1984')
+    else:
+        ax.set_xlabel('N_surplus')
+        ax.set_ylabel('NUE')
+        ax.set_zlabel('f(N_surplus, NUE)')
+        ax.set_title('3D Plot of NUE reward function')
+
     plt.show()
