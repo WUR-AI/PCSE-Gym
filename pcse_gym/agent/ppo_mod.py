@@ -2,10 +2,22 @@ from gymnasium import spaces
 import torch as th
 import numpy as np
 from torch.nn import functional as F
+from typing import NamedTuple
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
-from stable_baselines3.common.buffers import RolloutBuffer
+from stable_baselines3.common.buffers import RolloutBuffer, RolloutBufferSamples
+
+
+class RolloutBufferSamplesStep(NamedTuple):
+    observations: th.Tensor
+    actions: th.Tensor
+    old_values: th.Tensor
+    old_log_prob: th.Tensor
+    advantages: th.Tensor
+    returns: th.Tensor
+    non_zero_action_counter: th.Tensor
+    episodic_step: th.Tensor
 
 
 class RegPPO(PPO):
@@ -149,9 +161,9 @@ class RegPPO(PPO):
 
 
 class LagrangianPPO(PPO):
-    def __init__(self, *args, initial_lambda=0.1, lr_lambda=0.01, constraint_threshold=0.1, **kwargs):
+    def __init__(self, *args, constraint_fn=None, initial_lambda=0.1, lr_lambda=0.01, constraint_threshold=0.1, **kwargs):
         super().__init__(*args, **kwargs)
-        self.constraint_fn = self.fertilization_action_constraint
+        self.constraint_fn = constraint_fn
         self.lambda_ = initial_lambda
         self.lr_lambda = lr_lambda
         self.constraint_threshold = constraint_threshold
@@ -163,8 +175,7 @@ class LagrangianPPO(PPO):
     def _setup_model(self) -> None:
         super()._setup_model()
 
-        if self.rollout_buffer_class is None:
-            self.rollout_buffer_class = RolloutBufferSteps
+        self.rollout_buffer_class = RolloutBufferSteps
 
         self.rollout_buffer = self.rollout_buffer_class(
             self.n_steps,
@@ -210,8 +221,9 @@ class LagrangianPPO(PPO):
             # Do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.get(self.batch_size):
 
-                # Get step number in rollout buffer
-                current_step = self.rollout_buffer.get_episode_step()
+                # Get step number in rollout buffer and non_zero_counter
+                rollout_episodic_steps = rollout_data.episodic_step
+                rollout_non_zero_action_counter = rollout_data.non_zero_action_counter
 
                 actions = rollout_data.actions
                 if isinstance(self.action_space, spaces.Discrete):
@@ -267,14 +279,18 @@ class LagrangianPPO(PPO):
 
                 # **Lagrangian Constraint Penalty Calculation**
                 if self.constraint_fn is not None:
-                    constraint_value = self.constraint_fn(rollout_data.observations, actions,
-                                                          current_step)
+                    constraint_value = self.constraint_fn(actions,
+                                                          rollout_episodic_steps,
+                                                          rollout_non_zero_action_counter,)
                     constraint_violation = th.mean(constraint_value) - self.constraint_threshold
                     lagrangian_penalty = self.lambda_ * constraint_violation
                     loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + lagrangian_penalty
 
                     # Update the Lagrange multiplier (gradient descent on lambda)
                     self.lambda_ += self.lr_lambda * constraint_violation.item()
+
+                    if constraint_violation.item() <= 0:
+                        self.lambda_ -= self.lr_lambda * 0.1  # Decay the multiplier slightly if the constraint is not violated
                     self.lambda_ = max(self.lambda_, 0)  # Ensure lambda is non-negative
                 else:
                     # If no constraint function, use the standard loss
@@ -326,60 +342,50 @@ class LagrangianPPO(PPO):
             self.logger.record("train/clip_range_vf", clip_range_vf)
         self.logger.record("train/lagrange_multiplier", self.lambda_)  # Log the current value of lambda
 
-    def fertilization_action_constraint(self,
-                                        actions,
-                                        step_number,
-                                        max_non_zero_actions=4,
-                                        start_step=5,
-                                        end_step=30,
-                                        time_weight=3,
-                                        n_weight=2):
+
+def fertilization_action_constraint(actions,
+                                    episodic_step,
+                                    non_zero_action_counter,
+                                    max_non_zero_actions=4,
+                                    start_step=5,
+                                    end_step=30,
+                                    time_weight=0.6,
+                                    n_weight=0.5):
+    """
+        Constraint function for RL agent.
+
+        Parameters:
+        - observations: The observations received from the environment.
+        - actions: The actions taken by the agent.
+        - step_number: The current step number in the episode.
+        - max_non_zero_actions: Maximum number of non-zero actions allowed.
+        - allowed_steps: List of steps at which certain actions are allowed.
+
+        Returns:
+        - constraint_value: The value representing the degree of constraint violation.
+                            A positive value indicates a violation.
         """
-            Constraint function for RL agent.
 
-            Parameters:
-            - observations: The observations received from the environment.
-            - actions: The actions taken by the agent.
-            - step_number: The current step number in the episode.
-            - max_non_zero_actions: Maximum number of non-zero actions allowed.
-            - allowed_steps: List of steps at which certain actions are allowed.
+    # Constraint 1: Number of non-zero actions that pass the defined threshold
+    sampled_non_zero_actions = (actions > 0)
+    constraint_1_violation = th.relu(non_zero_action_counter + sampled_non_zero_actions - max_non_zero_actions)
 
-            Returns:
-            - constraint_value: The value representing the degree of constraint violation.
-                                A positive value indicates a violation.
-            """
+    # Constraint 2: Actions allowed only at specific step numbers
+    invalid_steps_mask = (episodic_step < start_step) | (episodic_step >= end_step)
+    non_zero_mask = actions != 0
+    constraint_2_violation = th.logical_and(invalid_steps_mask, non_zero_mask)
 
+    # The constraint value is a sum of the violations
+    constraint_value = constraint_1_violation * n_weight + constraint_2_violation * time_weight
 
-        # Constraint 1: Number of non-zero actions should be <= max_non_zero_actions
-
-        if step_number == 0:
-            self.non_zero_action_counter = np.zeros(self.n_envs) if self.n_envs > 1 else 0
-
-        # Account for multiprocessing
-        # TODO Add multiprocessing
-        if self.n_envs > 1:
-            constraint_1_violation = 0
-            num_non_zero_actions = np.count_nonzero(actions)
-            for idx in range(self.n_envs):
-                self.non_zero_action_counter[idx] = ...  # look at this
-            constraint_1_violation = max(0, num_non_zero_actions - max_non_zero_actions)
-        else:
-            num_non_zero_actions = np.count_nonzero(actions)
-            self.non_zero_action_counter += 1 if num_non_zero_actions > 0 else 0
-            constraint_1_violation = max(0, num_non_zero_actions - max_non_zero_actions)
-
-        # Constraint 2: Actions allowed only at specific step numbers
-        constraint_2_violation = 0
-        if step_number not in range(start_step, end_step):
-            constraint_2_violation = 1  # Violation if step number is not in the allowed list
-
-        # The constraint value is a sum of the violations
-        constraint_value = constraint_1_violation * n_weight + constraint_2_violation * time_weight
-
-        return constraint_value
+    return constraint_value
 
 
 class RolloutBufferSteps(RolloutBuffer):
+
+    episodic_step: np.ndarray
+    non_zero_action_counter: np.ndarray
+
     def __init__(self, buffer_size, observation_space, action_space, device='cpu', gae_lambda=1, gamma=0.99, n_envs=1, **kwargs):
         super().__init__(buffer_size, observation_space, action_space, device, gae_lambda, gamma, n_envs, **kwargs)
         self.step_counter = np.zeros(n_envs, dtype=int)  # Initialize step counter for each environment
@@ -388,20 +394,107 @@ class RolloutBufferSteps(RolloutBuffer):
         """
         Reset the rollout buffer and step counters.
         """
+        self.step_counter = np.zeros(self.n_envs, dtype=int)  # Reset step counters for each episode
+        self.episodic_step = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)  # Reset rollout steps
+        self.non_zero_action_counter = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)  # Reset counter
         super(RolloutBufferSteps, self).reset()
-        self.step_counter = np.zeros(self.n_envs, dtype=int)  # Reset step counters for each environment
 
-    def add(self, *args, **kwargs):
+    def add(
+            self,
+            obs: np.ndarray,
+            action: np.ndarray,
+            reward: np.ndarray,
+            episode_start: np.ndarray,
+            value: th.Tensor,
+            log_prob: th.Tensor,
+    ) -> None:
         """
-        Add a new experience to the buffer.
-        Also increment the step counter for the respective environment.
+        :param obs: Observation
+        :param action: Action
+        :param reward:
+        :param episode_start: Start of episode signal.
+        :param value: estimated value of the current state
+            following the current policy.
+        :param log_prob: log probability of the action
+            following the current policy.
         """
-        super(RolloutBufferSteps, self).add(*args, **kwargs)
-        # Increment step counters for the environments where a step is added
+        if len(log_prob.shape) == 0:
+            # Reshape 0-d tensor to avoid error
+            log_prob = log_prob.reshape(-1, 1)
+
+        # Reshape needed when using multiple envs with discrete observations
+        # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+        if isinstance(self.observation_space, spaces.Discrete):
+            obs = obs.reshape((self.n_envs, *self.obs_shape))
+
+        # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
+        action = action.reshape((self.n_envs, self.action_dim))
+
+        self.observations[self.pos] = np.array(obs)
+        self.actions[self.pos] = np.array(action)
+        # Increment non_zero_action_counter
+        for i in range(self.n_envs):
+            if self.actions[self.pos][i] > 0:
+                self.non_zero_action_counter[self.pos][i] += 1
+        self.rewards[self.pos] = np.array(reward)
+        self.episode_starts[self.pos] = np.array(episode_start)
+        self.values[self.pos] = value.clone().cpu().numpy().flatten()
+        self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
+        self.episodic_step[self.pos] = self.step_counter
         self.step_counter += 1
+        # Increment step counters for the environments where a step is added
         for idx in range(self.n_envs):
             if self.episode_starts[self.pos][idx]:
-                self.step_counter = 0
+                self.step_counter[idx] = 0
+        self.pos += 1
+        if self.pos == self.buffer_size:
+            self.full = True
+
+    def get(self, batch_size = None):
+        assert self.full, ""
+        indices = np.random.permutation(self.buffer_size * self.n_envs)
+        # Prepare the data
+        if not self.generator_ready:
+            _tensor_names = [
+                "observations",
+                "actions",
+                "values",
+                "log_probs",
+                "advantages",
+                "returns",
+                "non_zero_action_counter",
+                "episodic_step",  # Adds info for step in episode
+            ]
+
+            for tensor in _tensor_names:
+                self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
+            self.generator_ready = True
+
+        # Return everything, don't create minibatches
+        if batch_size is None:
+            batch_size = self.buffer_size * self.n_envs
+
+        start_idx = 0
+        while start_idx < self.buffer_size * self.n_envs:
+            yield self._get_samples(indices[start_idx : start_idx + batch_size])
+            start_idx += batch_size
+
+    def _get_samples(
+        self,
+        batch_inds: np.ndarray,
+        env=None,
+    ) -> RolloutBufferSamplesStep:
+        data = (
+            self.observations[batch_inds],
+            self.actions[batch_inds],
+            self.values[batch_inds].flatten(),
+            self.log_probs[batch_inds].flatten(),
+            self.advantages[batch_inds].flatten(),
+            self.returns[batch_inds].flatten(),
+            self.non_zero_action_counter[batch_inds].flatten(),
+            self.episodic_step[batch_inds].flatten(),
+        )
+        return RolloutBufferSamplesStep(*tuple(map(self.to_torch, data)))
 
     def compute_returns_and_advantage(self, last_values, dones):
         """
@@ -410,9 +503,12 @@ class RolloutBufferSteps(RolloutBuffer):
         """
         super(RolloutBufferSteps, self).compute_returns_and_advantage(last_values, dones)
         # Reset step counters for environments where the episode ended
-        self.step_counter[dones] = 0
+        for env_idx in range(self.n_envs):
+            if dones[env_idx]:
+                self.step_counter[self.pos, env_idx] = 0
+                self.non_zero_action_counter[self.pos, env_idx] = 0
 
-    def get_episode_step(self, env_idx=0):
+    def get_episodic_step(self, env_idx=0):
         """
         Get the current step number for a specific environment.
         """
