@@ -571,6 +571,11 @@ class Rewards:
             base_nue = max(0, min(1, 1 - (abs(nue - 0.7) - 0.2) / nue_width))
             return base_nsurp * base_nue
 
+        def n_surplus_formula_piecewise(self, n_surplus, nue, nsurp_width=100, nue_width=1):
+            base_nsurp = max(0, min(1, 1 - (abs(n_surplus - 20) - 20) / nsurp_width))
+            base_nue = self.nue_condition_simple(nue)
+            return base_nsurp * base_nue
+
         @staticmethod
         def normalize_yield(y, maxy=get_max_yield(), miny=get_min_yield()):
             return max(0, (y - miny) / (maxy - miny))
@@ -579,8 +584,11 @@ class Rewards:
         def include_yield_req(req, y):
             return y if req == 1 else 0
 
-        def formula_nue(self, n_surplus, nue, end_yield):
-            nsurp_value = self.n_surplus_formula(n_surplus, nue)
+        def formula_nue(self, n_surplus, nue, end_yield, piecewise_nue=True):
+            if not piecewise_nue:
+                nsurp_value = self.n_surplus_formula(n_surplus, nue)
+            else:
+                nsurp_value = self.n_surplus_formula_piecewise(n_surplus, nue)
             normalized_yield = self.normalize_yield(end_yield)
             return nsurp_value + self.include_yield_req(nsurp_value, normalized_yield)
 
