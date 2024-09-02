@@ -22,7 +22,7 @@ from pcse_gym.utils.eval import EvalCallback, determine_and_log_optimum
 from pcse_gym.utils.normalization import VecNormalizePO
 import pcse_gym.utils.defaults as defaults
 from pcse_gym.agent.masked_actorcriticpolicy import MaskedRecurrentActorCriticPolicy, MaskedActorCriticPolicy
-from pcse_gym.agent.ppo_mod import RegPPO
+# from pcse_gym.agent.ppo_mod import RegPPO
 
 path_to_program = lib_programname.get_path_executed_script()
 rootdir = path_to_program.parents[0]
@@ -52,8 +52,9 @@ def args_func(parser):
     parser.add_argument("-r", "--reward", type=str, default="DEF",
                         help="Reward function. DEF, DEP, GRO, END, NUE or ANE")
     parser.add_argument("-b", "--n-budget", type=int, default=0, help="Nitrogen budget. kg/ha")
-    parser.add_argument("--action_limit", type=int, default=0, help="Limit fertilization frequency."
-                                                                    "Recommended 4 times")
+    parser.add_argument("--action-limit", type=int, default=0, dest="action_limit",
+                        help="Limit fertilization frequency."
+                             "Recommended 4 times")
     parser.add_argument("-m", "--measure", action='store_true', help="--measure or --no-measure."
                                                                      "Train an agent in a partially"
                                                                      "observable environment that"
@@ -84,6 +85,7 @@ def args_func(parser):
     parser.add_argument("--regl2", type=float, default=0.0, dest='regl2')
     parser.add_argument("--regl1", type=float, default=0.0, dest='regl1')
     parser.add_argument("--irs", type=str, default=None, dest='irs')
+    parser.add_argument("--discrete-space", type=int, default=None, dest='discrete_space')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
@@ -103,30 +105,31 @@ def wrapper_vectorized_env(env_pcse_train, flag_po, flag_eval=False, multiproc=F
                               clip_obs=10000000., clip_reward=100000., gamma=1)
     if multiproc and not flag_eval:
         vec_env = SubprocVecEnv([lambda: env_pcse_train for _ in range(n_envs)])
-        return VecNormalize(vec_env)
+        return VecNormalize(vec_env, norm_obs=True, norm_reward=True,
+                            clip_obs=10000000., clip_reward=100000., gamma=1)
     else:
         return VecNormalize(DummyVecEnv([lambda: env_pcse_train]), norm_obs=True, norm_reward=True,
                             clip_obs=10000000., clip_reward=100000., gamma=1)  # gamma 1 because fixed length episodes
 
 
 def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, actor_critic_masked, decay_entropy, mask_later):
-    if agent == 'PPO' or agent == 'MaskedPPO':
-        hyperparams = {'batch_size': 256, 'n_steps': 2048, 'learning_rate': 0.0005,
-                       'ent_coef': 1.0 if decay_entropy else 0.15,
-                       'clip_range': 0.2,
-                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.5,
+    if agent == 'PPO' or agent == 'MaskedPPO' or agent == 'LagPPO':
+        hyperparams = {'batch_size': 276, 'n_steps': 2208, 'learning_rate': 0.0002,
+                       'ent_coef': 1.0 if decay_entropy else 0.01,
+                       'clip_range': 0.1,
+                       'n_epochs': 20, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.5,
                        'policy_kwargs': {},
                        }
-        # if not no_weather:
-        #     hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
-        #                                                      n_weather_features=len(weather_features),
-        #                                                      n_action_features=len(action_features),
-        #                                                      n_po_features=len(po_features) if flag_po else 0,
-        #                                                      mask_binary=mask_binary)
+        if not no_weather:
+            hyperparams['policy_kwargs'] = get_policy_kwargs(n_crop_features=len(crop_features),
+                                                             n_weather_features=len(weather_features),
+                                                             n_action_features=len(action_features),
+                                                             n_po_features=len(po_features) if flag_po else 0,
+                                                             mask_binary=mask_binary)
         hyperparams['policy_kwargs']['net_arch'] = dict(pi=[256, 256], vf=[256, 256])
         hyperparams['policy_kwargs']['activation_fn'] = nn.Tanh
         hyperparams['policy_kwargs']['ortho_init'] = False
-        hyperparams['policy_kwargs']['share_features_extractor'] = False
+        # hyperparams['policy_kwargs']['share_features_extractor'] = False
         if actor_critic_masked > 0:
             hyperparams['policy_kwargs']['max_non_zero_actions'] = actor_critic_masked
             if decay_entropy or mask_later:
@@ -331,7 +334,16 @@ def train(log_dir, n_steps,
         # policy = get_actor_critic_policy(masked_ac, agent)
         print('Using MaskedPPO!')
         model = MaskedPPO('MlpPolicy', env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
-                             tensorboard_log=log_dir, device=device)
+                          tensorboard_log=log_dir, device=device)
+    elif agent == 'LagPPO':
+        from pcse_gym.agent.ppo_mod import LagrangianPPO, fertilization_action_constraint, CostActorCriticPolicy
+        env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
+                                                multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
+        # policy = get_actor_critic_policy(masked_ac, agent)
+        print('Using LagrangianPPO!')
+        model = LagrangianPPO(CostActorCriticPolicy, env_pcse_train, gamma=1, seed=seed, verbose=0,
+                              constraint_fn=fertilization_action_constraint, **hyperparams,
+                              tensorboard_log=log_dir, device=device)
 
     irs_method = None
     if irs is not None:
@@ -440,10 +452,10 @@ if __name__ == '__main__':
     # random weather
     # TODO tidy up
     if args.random_weather and not args.overfit:
-        train_locations = [(52.57, 5.63), (52.5, 5.5)]
+        train_locations = [(52.57, 5.63)]  #, (52.5, 5.5)]
         test_locations = [(52.57, 5.63)]
-        train_years = [*range(4000, 5999)]
-        test_years = [*range(1983, 2016)]
+        train_years = [*range(3002, 5999)]
+        test_years = [*range(1983, 2022)]
     elif args.random_weather and args.overfit:
         train_locations = [(52.57, 5.63)]
         test_locations = [(52.57, 5.63)]
@@ -486,7 +498,8 @@ if __name__ == '__main__':
               'random_init': args.random_init, 'm_multiplier': args.m_multiplier, 'measure_all': args.measure_all,
               'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs, 'vision': args.vision,
               'masked_ac': args.masked_ac, 'decay_entropy': args.decay_entropy, 'nsteps': args.nsteps,
-              'mask_later': args.mask_later, 'regl2': args.regl2, 'regl1': args.regl1, 'irs': args.irs}
+              'mask_later': args.mask_later, 'regl2': args.regl2, 'regl1': args.regl1, 'irs': args.irs,
+              'discrete_space': args.discrete_space, }
 
     if args.decay_entropy:
         print('Training with entropy decay')
@@ -494,7 +507,10 @@ if __name__ == '__main__':
     assert not (args.environment == 2 and args.measure is True), "WOFOST SNOMIN doesn't support AFA-POMDPs yet"
     # define MeasureOrNot environment if specified
     if not args.measure:
-        action_spaces = gymnasium.spaces.Discrete(9)  # 9 levels of fertilizing
+        if args.discrete_space is None:
+            action_spaces = gymnasium.spaces.Discrete(9)  # 9 levels of fertilizing
+        else:
+            action_spaces = gymnasium.spaces.Discrete(args.discrete_space)
     else:
         if args.environment == 1:
             po_features = ['TAGP', 'LAI', 'NAVAIL', 'NuptakeTotal', 'SM']

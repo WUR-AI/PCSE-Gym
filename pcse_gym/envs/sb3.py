@@ -200,6 +200,8 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         self.index_feature = OrderedDict()
         self.cost_measure = kwargs.get('cost_measure', 'real')
         self.start_type = kwargs.get('start_type')
+        self.discrete_action_space = kwargs.get('discrete_space', None)
+        self.generated_action_space = self.generate_action_space(self.discrete_action_space)
 
         for i, feature in enumerate(self.crop_features):
             if feature in self.po_features:
@@ -228,6 +230,8 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
 
     def _apply_action(self, action):
         # action = action * self.action_multiplier
+        if self.discrete_action_space is not None:
+            action = self.generated_action_space[action]
         action = action * 10  # kg N / ha
         return action
 
@@ -367,6 +371,20 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
     @weather_data_provider.setter
     def weather_data_provider(self, weather):
         self._weather_data_provider = weather
+
+    def generate_action_space(self, n):
+        if n is not None:
+            if n <= 0:
+                return []
+
+            action_space = [0, 3]
+
+            for i in range(2, n):
+                action_space.append(3 + (i - 1) * .5)
+
+            return action_space
+        else:
+            return self.action_space
 
 
 class ZeroNitrogenEnvStorage:
