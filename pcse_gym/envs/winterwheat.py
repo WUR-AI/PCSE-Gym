@@ -40,6 +40,7 @@ class WinterWheat(gym.Env):
         self.years = [years] if isinstance(years, int) else years
         self.locations = [locations] if isinstance(locations, tuple) else locations
         self.action_multiplier = action_multiplier
+        self.discrete_action_space = kwargs.get('discrete_space', None)
         self.action_space = action_space
         self._timestep = timestep
         self.reward_function = reward
