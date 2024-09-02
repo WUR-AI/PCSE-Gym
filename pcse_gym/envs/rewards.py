@@ -584,7 +584,7 @@ class Rewards:
         def include_yield_req(req, y):
             return y if req == 1 else 0
 
-        def formula_nue(self, n_surplus, nue, end_yield, piecewise_nue=True):
+        def formula_nue(self, n_surplus, nue, end_yield, piecewise_nue=False):
             if not piecewise_nue:
                 nsurp_value = self.n_surplus_formula(n_surplus, nue)
             else:
