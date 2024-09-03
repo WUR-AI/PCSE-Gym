@@ -23,6 +23,7 @@ from stable_baselines3.common.distributions import MultiCategoricalDistribution
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 from sb3_contrib import RecurrentPPO
 from sb3_contrib import MaskablePPO as MaskedPPO
+from pcse_gym.agent.ppo_mod import LagrangianPPO
 import pcse_gym.utils.defaults as defaults
 from pcse_gym.utils.process_pcse_output import get_dict_lintul_wofost
 from pcse_gym.utils.nitrogen_helpers import get_surplus_n
@@ -223,7 +224,23 @@ def evaluate_policy(
                 action = [amount * 1]
             if isinstance(policy, base_class.BaseAlgorithm):
                 device = policy.device.type
-                if isinstance(policy, PPO):
+                if isinstance(policy, LagrangianPPO):
+                    action, state = policy.predict(obs, state=state, deterministic=deterministic)
+                    if 'cuda' in device:
+                        sb_actions, sb_values, sb_cost_values, sb_log_probs = policy.policy(torch.from_numpy(obs).to(device),
+                                                                            deterministic=deterministic)
+                        sb_prob = np.exp(sb_log_probs.detach().cpu().numpy()).item()
+                        sb_val = sb_values.detach().cpu().item()
+                        sb_cost_values = sb_cost_values.detach().cpu().item()
+                    else:
+                        sb_actions, sb_values, sb_log_probs = policy.policy(torch.from_numpy(obs),
+                                                                            deterministic=deterministic)
+                        sb_prob = np.exp(sb_log_probs.detach().numpy()).item()
+                        sb_val = sb_values.detach().item()
+                    prob = sb_prob
+                    val = sb_val
+                    cost_val = sb_cost_values
+                if isinstance(policy, PPO) and not isinstance(policy, LagrangianPPO):
                     action, state = policy.predict(obs, state=state, deterministic=deterministic)
                     if 'cuda' in device:
                         sb_actions, sb_values, sb_log_probs = policy.policy(torch.from_numpy(obs).to(device),
@@ -620,7 +637,7 @@ class EvalCallback(BaseCallback):
                  test_years=defaults.get_default_test_years(),
                  train_locations=defaults.get_default_location(), test_locations=defaults.get_default_location(),
                  n_eval_episodes=1, eval_freq=20_000, pcse_model=1, seed=0, comet_experiment=None, multiprocess=False,
-                 irs_method=None,
+                 irs_method=None, kl_target=0.03,
                  **kwargs):
         super(EvalCallback, self).__init__()
         self.test_years = test_years
@@ -628,6 +645,8 @@ class EvalCallback(BaseCallback):
         self.train_locations = [train_locations] if isinstance(train_locations, tuple) else train_locations
         self.test_locations = [test_locations] if isinstance(test_locations, tuple) else test_locations
         self.n_eval_episodes = n_eval_episodes
+        self.multiprocess = multiprocess
+        self.n_envs = kwargs.get('n_envs')
         self.eval_freq = eval_freq
         self.pcse_model = pcse_model
         self.seed = seed
@@ -635,8 +654,6 @@ class EvalCallback(BaseCallback):
         self.comet_experiment = comet_experiment
         self.po_features = kwargs.get('po_features')
         self.random_weather = kwargs.get('random_weather', False)
-        self.multiprocess = multiprocess
-        self.n_envs = kwargs.get('n_envs')
         self.masked_ac = kwargs.get('masked_ac')
         self.decay_entropy = kwargs.get('decay_entropy')
         self.total_timesteps = kwargs.get('nsteps')
@@ -650,6 +667,8 @@ class EvalCallback(BaseCallback):
         self.mask_later = kwargs.get('mask_later')
         self.irs = irs_method
         self.buffer = None
+        self.kl_target = None
+        self.warmup_steps = 100_000  # for KL target; adjust if necessary
 
         def def_value(): return 0
 
@@ -733,6 +752,31 @@ class EvalCallback(BaseCallback):
             else:
                 if self.locals['dones'].item():
                     self.model.policy.reset_non_zero_action_count()
+
+        # Early stopping based on KL divergence
+        if self.kl_target is not None and isinstance(self.model, LagrangianPPO):
+            kl_div = self.model.mean_approx_kl
+            # print(f"KL divergence is {kl_div}, and target is {self.kl_target}")
+            if kl_div is not None:
+                if kl_div > self.kl_target and self.n_calls >= self.warmup_steps:
+                    print(f"Stopping early due to KL divergence: {kl_div} exceeding threshold: {self.kl_target}")
+                    # self.model = self.model.load(self.best_model_path, self.model.get_env())
+                    return False
+
+            if self.n_calls % (self.eval_freq/4) == 0:
+                model_path = os.path.join(self.logger.dir, f'best-model.zip')
+                self.model.save(model_path)
+                if not self.env_eval.envs[0].unwrapped.normalize:
+                    stats_path = os.path.join(self.logger.dir, f'best-env.pkl')
+                    self.model.get_env().save(stats_path)
+                if self.comet_experiment is not None:
+                    self.comet_experiment.log_asset(file_data=os.path.join(self.logger.dir, f'best-env.pkl'),
+                                                    step=self.num_timesteps,
+                                                    file_name=f'best-env.pkl')
+                    self.comet_experiment.log_model(self.comet_experiment.get_name(),
+                                                    os.path.join(self.logger.dir, f'best-model.zip'),
+                                                    file_name=f'best-model.zip')
+
 
         # For decaying of entropy coefficient
         if self.decay_entropy:
@@ -1020,14 +1064,14 @@ class EvalCallback(BaseCallback):
         # ===================== compute the intrinsic rewards ===================== #
         # prepare the data samples
         if self.irs is not None:
-            obs = torch.as_tensor(self.buffer.observations)
+            obs = torch.as_tensor(self.model.rollout_buffer.observations)
             # get the new observations
             new_obs = obs.clone()
             new_obs[:-1] = obs[1:]
             new_obs[-1] = torch.as_tensor(self.locals["new_obs"])
-            actions = torch.as_tensor(self.buffer.actions)
-            rewards = torch.as_tensor(self.buffer.rewards)
-            dones = torch.as_tensor(self.buffer.episode_starts)
+            actions = torch.as_tensor(self.model.rollout_buffer.actions)
+            rewards = torch.as_tensor(self.model.rollout_buffer.rewards)
+            dones = torch.as_tensor(self.model.rollout_buffer.episode_starts)
             # print(obs.shape, actions.shape, rewards.shape, dones.shape, obs.shape)
             # compute the intrinsic rewards
             intrinsic_rewards = self.irs.compute(
@@ -1036,10 +1080,15 @@ class EvalCallback(BaseCallback):
                              truncateds=dones, next_observations=new_obs),
                 sync=True)
             # add the intrinsic rewards to the buffer
-            self.buffer.advantages += intrinsic_rewards.cpu().numpy()
-            self.buffer.returns += intrinsic_rewards.cpu().numpy()
+            self.model.rollout_buffer.advantages += intrinsic_rewards.cpu().numpy()
+            self.model.rollout_buffer.returns += intrinsic_rewards.cpu().numpy()
             # print(f'Intrinsic reward in step {self.num_timesteps} is {intrinsic_rewards.cpu().numpy()}')
             # ===================== compute the intrinsic rewards ===================== #
+
+    def _on_training_end(self) -> None:
+        if self.kl_target is not None:
+            print(f"Early stopping at step {self.num_timesteps}")
+
 
 
 class CometCallback(EvalCallback):
