@@ -114,10 +114,10 @@ def wrapper_vectorized_env(env_pcse_train, flag_po, flag_eval=False, multiproc=F
 
 def get_hyperparams(agent, pcse_env, no_weather, flag_po, mask_binary, actor_critic_masked, decay_entropy, mask_later):
     if agent == 'PPO' or agent == 'MaskedPPO' or agent == 'LagPPO':
-        hyperparams = {'batch_size': 276, 'n_steps': 2208, 'learning_rate': 0.0002,
-                       'ent_coef': 1.0 if decay_entropy else 0.0,
-                       'clip_range': 0.1,
-                       'n_epochs': 20, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.5,
+        hyperparams = {'batch_size': 276, 'n_steps': 2208, 'learning_rate': 0.001,
+                       'ent_coef': 1.0 if decay_entropy else 0.01,
+                       'clip_range': 0.2,
+                       'n_epochs': 10, 'gae_lambda': 0.95, 'max_grad_norm': 0.5, 'vf_coef': 0.5,
                        'policy_kwargs': {},
                        }
         if not no_weather:
