@@ -42,7 +42,8 @@ def main():
     action_features = defaults.get_default_action_features()
 
     env = initialize_env(crop_features=crop_features,
-                         costs_nitrogen=100,
+                         action_features=action_features,
+                         costs_nitrogen=0.01,
                          years=eval_year,
                          locations=eval_locations,
                          reward='NUE',
@@ -63,8 +64,8 @@ def main():
 
 
     df = pd.DataFrame(optimum, columns=[eval_year[0]])
-    os.makedirs(os.path.join(rootdir, 'ceres_results', 'constrained'), exist_ok=True)
-    df.to_csv(os.path.join(rootdir, 'ceres_results', 'constrained', f"{eval_locations[0][0]}-{eval_locations[0][1]}-{eval_year[0]}.csv"))
+    os.makedirs(os.path.join(rootdir, 'ceres_results', 'constrained_all_0'), exist_ok=True)
+    df.to_csv(os.path.join(rootdir, 'ceres_results', 'constrained_all_0', f"{eval_locations[0][0]}-{eval_locations[0][1]}-{eval_year[0]}.csv"))
     # n_timings(env)
 
 
