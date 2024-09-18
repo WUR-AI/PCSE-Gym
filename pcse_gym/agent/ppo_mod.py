@@ -3,11 +3,11 @@ import torch as th
 import numpy as np
 from torch.nn import functional as F
 import torch.nn as nn
-from typing import NamedTuple, Union
+from typing import NamedTuple, Union, Tuple
 from functools import partial
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.utils import explained_variance, get_schedule_fn, obs_as_tensor
+from stable_baselines3.common.utils import explained_variance, get_schedule_fn, obs_as_tensor, get_device
 from stable_baselines3.common.buffers import RolloutBuffer, RolloutBufferSamples
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
@@ -27,26 +27,42 @@ class RolloutBufferSamplesStep(NamedTuple):
     non_zero_action_counter: th.Tensor
     episodic_step: th.Tensor
     last_non_zero_action_step: th.Tensor
+    nitrogen_efficiency: th.Tensor
+    nitrogen_surplus: th.Tensor
+    end_of_episode_mask: th.Tensor
+    dvs: th.Tensor
+
+
+class RolloutBufferNitrogenStep(NamedTuple):
+    observations: th.Tensor
+    actions: th.Tensor
+    old_values: th.Tensor
+    old_log_prob: th.Tensor
+    advantages: th.Tensor
+    cost_advantages: th.Tensor
+    returns: th.Tensor
+    costs: th.Tensor
+    cost_values: th.Tensor
+    cost_returns: th.Tensor
+    non_zero_action_counter: th.Tensor
+    episodic_step: th.Tensor
+    last_non_zero_action_step: th.Tensor
+    nitrogen_surplus: th.Tensor
+    nitrogen_use_efficiency: th.Tensor
 
 
 class LagrangianPPO(PPO):
-    def __init__(self, *args, constraint_fn=None, initial_lambda=0.1, lr_lambda=0.01, constraint_threshold=0.1, **kwargs):
+    def __init__(self, *args, constraint_fn=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.constraint_fn = constraint_fn
-        self.lambda_ = th.ones(3) * initial_lambda
-        self.lambda_min = initial_lambda
-        self.lr_lambda = lr_lambda
-        self.p = 1.5
-        self.constraint_threshold = constraint_threshold
         if self.n_envs > 1:
             self.non_zero_action_counter = np.zeros(self.n_envs)
         else:
             self.non_zero_action_counter = 0
         self.mean_approx_kl = None
-        self.cost_vf_coef = 0.5
-        self.lagrange = Lagrange(cost_limit=0.0, lagrangian_multiplier_init=0.001, lagrangian_multiplier_lr=0.035)
-        # for i in range(3):
-        #     self.lagrange[i] = Lagrange(cost_limit=0.0, lagrangian_multiplier_init=0.001, lagrangian_multiplier_lr=0.035)
+        self.cost_vf_coef = 0.7
+        self.lagrange = Lagrange(cost_limit=0.0, lagrangian_multiplier_init=0.001, lagrangian_multiplier_lr=0.0005,
+                                 lagrangian_upper_bound=3)
 
     def _setup_model(self) -> None:
         super()._setup_model()
@@ -63,7 +79,6 @@ class LagrangianPPO(PPO):
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,
             n_envs=self.n_envs,
-            **self.rollout_buffer_kwargs,
         )
 
         # Initialize schedules for policy/value clipping
@@ -95,7 +110,7 @@ class LagrangianPPO(PPO):
 
         entropy_losses = []
         pg_losses, value_losses, lagrangian_penalty, cost_value_losses = [], [], [], []
-        constraint_1, constraint_2, constraint_3 = [], [], []
+        constraint_1, constraint_2, constraint_3, constraint_nue, constraint_n_surplus = [], [], [], [], []
         clip_fractions = []
 
         continue_training = True
@@ -117,6 +132,10 @@ class LagrangianPPO(PPO):
                 rollout_episodic_steps = rollout_data.episodic_step
                 rollout_non_zero_action_counter = rollout_data.non_zero_action_counter
                 rollout_consecutive_non_zero = rollout_data.last_non_zero_action_step
+                rollout_dvs = rollout_data.dvs
+                rollout_nue = rollout_data.nitrogen_efficiency
+                rollout_n_surp = rollout_data.nitrogen_surplus
+                rollout_end_mask = rollout_data.end_of_episode_mask
 
                 actions = rollout_data.actions
                 if isinstance(self.action_space, spaces.Discrete):
@@ -127,7 +146,8 @@ class LagrangianPPO(PPO):
                 if self.use_sde:
                     self.policy.reset_noise(self.batch_size)
 
-                values, cost_values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, cost_values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations,
+                                                                                      actions)
                 values = values.flatten()
                 cost_values = cost_values.flatten()
                 # Normalize advantage
@@ -189,16 +209,25 @@ class LagrangianPPO(PPO):
 
                 # **Lagrangian Constraint Penalty Calculation**
                 if self.constraint_fn is not None:
-                    con1, con2, con3 = self.constraint_fn(actions,
-                                                          rollout_episodic_steps,
-                                                          rollout_non_zero_action_counter,
-                                                          rollout_consecutive_non_zero,)
-                    con1_penalty, con2_penalty, con3_penalty = th.mean(con1), th.mean(con2), th.mean(con3)
+                    con1, con2, con3, nue_con, n_surp_con = self.constraint_fn(actions,
+                                                                               rollout_episodic_steps,
+                                                                               rollout_non_zero_action_counter,
+                                                                               rollout_consecutive_non_zero,
+                                                                               rollout_dvs,
+                                                                               rollout_nue,
+                                                                               rollout_n_surp,
+                                                                               rollout_end_mask,
+                                                                               )
+                    con1_penalty, con2_penalty, con3_penalty, nue_penalty, n_surp_penalty = (th.mean(con1),
+                                                                                             th.mean(con2),
+                                                                                             th.mean(con3),
+                                                                                             th.sum(nue_con if isinstance(nue_con, th.Tensor) else th.tensor(nue_con)),
+                                                                                             th.sum(n_surp_con if isinstance(n_surp_con, th.Tensor) else th.tensor(n_surp_con)))
                     # constraint_violation = th.mean(constraint_value)  # - self.constraint_threshold
                     # constraint_violation = th.dot(self.lambda_, th.tensor([con1_violation, con2_violation, con3_violation]))
 
                     # self.lagrange.update_lagrange_multiplier(sum(constraint_violation))
-                    lagrangian_penalty = con1_penalty + con2_penalty + con3_penalty
+                    # lagrangian_penalty = con1_penalty + con2_penalty + con3_penalty + nue_penalty + n_surp_penalty
 
                     # Calculate loss
                     loss = (policy_loss +
@@ -209,6 +238,8 @@ class LagrangianPPO(PPO):
                     constraint_1.append(con1_penalty)
                     constraint_2.append(con2_penalty)
                     constraint_3.append(con3_penalty)
+                    constraint_nue.append(nue_penalty)
+                    constraint_n_surplus.append(n_surp_penalty)
 
                     # Update the Lagrange multiplier (gradient ascent on lambda)
                     # self.lambda_ = max(self.lambda_min, self.lambda_ + self.lr_lambda * constraint_violation.item() ** self.p)
@@ -265,7 +296,9 @@ class LagrangianPPO(PPO):
         self.logger.record("train/lagrangian_multiplier", lagrangian_multiplier)
         self.logger.record("train/constraint_n_non_zero", np.mean(constraint_1))
         self.logger.record("train/constraint_weeks", np.mean(constraint_2))
-        # self.logger.record("train/constraint_consecutive_actions", np.mean(constraint_3))
+        self.logger.record("train/constraint_nue", np.mean(constraint_nue))
+        self.logger.record("train/constraint_n_surplus", np.mean(constraint_n_surplus))
+        self.logger.record("train/constraint_consecutive_actions", np.mean(constraint_3))
         self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
         self.logger.record("train/clip_fraction", np.mean(clip_fractions))
         self.logger.record("train/loss", loss.item())
@@ -280,14 +313,14 @@ class LagrangianPPO(PPO):
         # self.logger.record("train/lagrange_multiplier", self.lambda_)  # Log the current value of lambda
 
     def augmented_lagrangian(self, cons):
-        return cons + (self.p/2) + th.linalg.norm(cons)**2
+        return cons + (self.p / 2) + th.linalg.norm(cons) ** 2
 
     def collect_rollouts(
-        self,
-        env,
-        callback,
-        rollout_buffer: RolloutBuffer,
-        n_rollout_steps: int,
+            self,
+            env,
+            callback,
+            rollout_buffer: RolloutBuffer,
+            n_rollout_steps: int,
     ) -> bool:
         """
         Collect experiences using the current policy and fill a ``RolloutBuffer``.
@@ -342,6 +375,13 @@ class LagrangianPPO(PPO):
 
             self.num_timesteps += env.num_envs
 
+            # Store N indicators
+            nue = np.zeros(self.n_envs, dtype=np.float32)
+            n_surplus = np.zeros(self.n_envs, dtype=np.float32)
+
+            # Store DVS
+            dvs = np.zeros(self.n_envs, dtype=np.float32)
+
             # Give access to local variables
             callback.update_locals(locals())
             if not callback.on_step():
@@ -358,14 +398,24 @@ class LagrangianPPO(PPO):
             # see GitHub issue #633
             for idx, done in enumerate(dones):
                 if (
-                    done
-                    and infos[idx].get("terminal_observation") is not None
-                    and infos[idx].get("TimeLimit.truncated", False)
+                        done
+                        and infos[idx].get("terminal_observation") is not None
+                        and infos[idx].get("TimeLimit.truncated", False)
                 ):
                     terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
                     with th.no_grad():
                         terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
                     rewards[idx] += self.gamma * terminal_value
+                if done:
+                    nue[idx] = next(iter(infos[idx].get("NUE").values()))
+                    n_surplus[idx] = next(iter(infos[idx].get("Nsurplus").values()))
+                    rollout_buffer.add_nitrogen_info(nue, n_surplus)
+
+            # add DVS to buffer
+            for idx in range(self.n_envs):
+                dvs[idx] = list(infos[idx].get("DVS").values())[-1]
+
+            rollout_buffer.add_dvs(dvs)
 
             rollout_buffer.add(
                 self._last_obs,  # type: ignore[arg-type]
@@ -381,7 +431,8 @@ class LagrangianPPO(PPO):
 
         with th.no_grad():
             # Compute value for the last timestep
-            values, cost_values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
+            values, cost_values = self.policy.predict_values(
+                obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
 
         rollout_buffer.compute_returns_and_advantage(last_values=values, last_cost_values=cost_values, dones=dones)
 
@@ -396,13 +447,20 @@ def fertilization_action_constraint(actions,
                                     episodic_step,
                                     non_zero_action_counter,
                                     last_non_zero_action_step,
+                                    dvs,
+                                    nitrogen_efficiency,
+                                    nitrogen_surplus,
+                                    end_of_episode_mask,
                                     max_non_zero_actions=4,
-                                    min_steps_between_actions=3,
-                                    start_step=5,
-                                    end_step=30,
-                                    time_weight=.2,
-                                    n_weight=.2,
-                                    con_weight=3.,):
+                                    min_steps_between_actions=2,
+                                    start_step=0.01,
+                                    end_step=1,
+                                    time_weight=50.,
+                                    n_weight=5.,
+                                    con_weight=3.,
+                                    nue_threshold=(0.5, 0.9),
+                                    n_surplus_threshold=(0, 40),
+                                    ):
     """
         Constraint function for RL agent.
 
@@ -422,8 +480,8 @@ def fertilization_action_constraint(actions,
     sampled_non_zero_actions = (actions > 0)
     constraint_1_violation = relu_func(non_zero_action_counter + sampled_non_zero_actions - max_non_zero_actions)
 
-    # Constraint 2: Actions allowed only at specific step numbers
-    invalid_steps_mask = (episodic_step <= start_step) | (episodic_step >= end_step)
+    # Constraint 2: Actions allowed only at specific step numbers based on DVS
+    invalid_steps_mask = (dvs <= start_step) | (dvs >= end_step)
     non_zero_mask = actions != 0
     constraint_2_violation = np.logical_and(invalid_steps_mask, non_zero_mask)
 
@@ -439,7 +497,20 @@ def fertilization_action_constraint(actions,
     # constraint_2_violation = sampled_non_zero_actions * 0
     constraint_3_violation = sampled_non_zero_actions * 0
 
-    return constraint_1_violation * n_weight, constraint_2_violation * time_weight, constraint_3_violation * con_weight
+    # NUE and N Surplus constraints
+    nue_violation = np.zeros_like(actions)
+    n_surplus_violation = np.zeros_like(actions)
+    if end_of_episode_mask.any():
+        nue_violation = (nitrogen_efficiency < nue_threshold[0]) | (nitrogen_efficiency > nue_threshold[1]) | (nitrogen_efficiency != 0.0)
+        n_surplus_violation = (nitrogen_surplus < nue_threshold[0]) | (nitrogen_surplus > n_surplus_threshold[1]) | (nitrogen_surplus != 0.0)
+        nue_violation = nue_violation * np.ones_like(actions)
+        n_surplus_violation = n_surplus_violation * np.ones_like(actions)
+
+    return (constraint_1_violation * n_weight,
+            constraint_2_violation * time_weight,
+            constraint_3_violation * con_weight,
+            nue_violation * 1.0,
+            n_surplus_violation * 1.0)
 
 
 def relu_func(x):
@@ -451,22 +522,27 @@ def bool_func(x):
 
 
 class RolloutBufferSteps(RolloutBuffer):
-
     episodic_step: np.ndarray
     non_zero_action_counter: np.ndarray
     costs: np.ndarray
     costs_values: np.ndarray
 
-    def __init__(self, buffer_size, observation_space, action_space, device='cpu', gae_lambda=1, gamma=0.99, n_envs=1, **kwargs):
+    def __init__(self, buffer_size, observation_space, action_space, device='cpu', gae_lambda=1, gamma=1, n_envs=1,
+                 **kwargs):
         super().__init__(buffer_size, observation_space, action_space, device, gae_lambda, gamma, n_envs, **kwargs)
         self.step_counter = np.zeros(n_envs, dtype=int)  # Initialize step counter for each environment
-        self.last_non_zero_action_step = np.full((self.buffer_size, self.n_envs), -5, dtype=int)  # For the consecutive non-zero action constraint
+        self.last_non_zero_action_step = np.full((self.buffer_size, self.n_envs), -5,
+                                                 dtype=int)  # For the consecutive non-zero action constraint
         self.costs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.cost_values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.calculate_costs = fertilization_action_constraint
         self.cost_advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.episode_costs = [[] for _ in range(self.n_envs)]  # List to accumulate episode costs
         self.cost_returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.nitrogen_efficiency = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.nitrogen_surplus = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.end_of_episode_mask = np.zeros((self.buffer_size, self.n_envs), dtype=bool)
+        self.dvs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
 
     def reset(self):
         """
@@ -479,9 +555,25 @@ class RolloutBufferSteps(RolloutBuffer):
         self.step_counter = np.zeros(self.n_envs, dtype=int)  # Reset step counters for each episode
         self.episodic_step = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)  # Reset rollout steps
         self.non_zero_action_counter = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)  # Reset counter
-        self.last_non_zero_action_step = np.full((self.buffer_size, self.n_envs), -5, dtype=int)  # Reset last non-zero action step counters
+        self.last_non_zero_action_step = np.full((self.buffer_size, self.n_envs), -5,
+                                                 dtype=int)  # Reset last non-zero action step counters
         self.episode_costs = [[] for _ in range(self.n_envs)]  # List to accumulate episode costs
+        self.nitrogen_efficiency = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.nitrogen_surplus = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.end_of_episode_mask = np.zeros((self.buffer_size, self.n_envs), dtype=bool)
+        self.dvs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         super(RolloutBufferSteps, self).reset()
+
+    def add_nitrogen_info(self, nue, n_surplus):
+        """
+        Add Nitrogen Use Efficiency (NUE) and N Surplus information to the buffer.
+        """
+        self.nitrogen_efficiency[self.pos] = nue
+        self.nitrogen_surplus[self.pos] = n_surplus
+        self.end_of_episode_mask[self.pos] = np.ones(self.n_envs, dtype=bool)
+
+    def add_dvs(self, dvs):
+        self.dvs[self.pos] = dvs
 
     def add(
             self,
@@ -490,7 +582,7 @@ class RolloutBufferSteps(RolloutBuffer):
             reward: np.ndarray,
             episode_start: np.ndarray,
             value: th.Tensor,
-            cost_value:th.Tensor,
+            cost_value: th.Tensor,
             log_prob: th.Tensor,
     ) -> None:
         """
@@ -532,21 +624,27 @@ class RolloutBufferSteps(RolloutBuffer):
         if len(self.episode_costs) == 0:
             self.episode_costs = [[] for _ in range(self.n_envs)]
 
-        # Increment non_zero_action_counter and calculate costs
+        # Increment non_zero_action_counter and calculate costs and add N indicators
         for i in range(self.n_envs):
             if self.actions[self.pos][i] > 0:
-                self.non_zero_action_counter[self.pos][i] = self.non_zero_action_counter[self.pos-1][i] + 1
+                self.non_zero_action_counter[self.pos][i] = self.non_zero_action_counter[self.pos - 1][i] + 1
                 self.last_non_zero_action_step[self.pos][i] = self.episodic_step[self.pos][i]
             # elif self.actions[self.pos][i] == 0 and self.last_non_zero_action_step[self.pos][i] == 0:
             else:
-                self.non_zero_action_counter[self.pos][i] = self.non_zero_action_counter[self.pos-1][i]
-                self.last_non_zero_action_step[self.pos][i] = self.last_non_zero_action_step[self.pos-1][i]
+                self.non_zero_action_counter[self.pos][i] = self.non_zero_action_counter[self.pos - 1][i]
+                self.last_non_zero_action_step[self.pos][i] = self.last_non_zero_action_step[self.pos - 1][i]
                 # self.last_non_zero_action_step[self.pos][i] = self.step_counter[i]
 
+            # Calculate costs for loss
             self.costs[self.pos][i] = np.sum(self.calculate_costs(self.actions[self.pos][i],
                                                                   self.episodic_step[self.pos][i],
                                                                   self.non_zero_action_counter[self.pos][i],
-                                                                  self.last_non_zero_action_step[self.pos][i]))
+                                                                  self.last_non_zero_action_step[self.pos][i],
+                                                                  self.dvs[self.pos][i],
+                                                                  self.nitrogen_efficiency[self.pos][i],
+                                                                  self.nitrogen_surplus[self.pos][i],
+                                                                  self.end_of_episode_mask[self.pos][i], )
+                                             )
 
             # If this is the start of a new episode, initialize tracking for costs
             if self.episode_starts[self.pos][i]:
@@ -593,7 +691,8 @@ class RolloutBufferSteps(RolloutBuffer):
 
         return total_costs_per_env
 
-    def compute_returns_and_advantage(self, last_values: th.Tensor, last_cost_values: th.Tensor, dones: np.ndarray) -> None:
+    def compute_returns_and_advantage(self, last_values: th.Tensor, last_cost_values: th.Tensor,
+                                      dones: np.ndarray) -> None:
         """
         Post-processing step: compute the lambda-return (TD(lambda) estimate)
         and GAE(lambda) advantage.
@@ -647,7 +746,7 @@ class RolloutBufferSteps(RolloutBuffer):
         self.returns = self.advantages + self.values
         self.cost_returns = self.cost_advantages + self.cost_values
 
-    def get(self, batch_size = None):
+    def get(self, batch_size=None):
         assert self.full, ""
         indices = np.random.permutation(self.buffer_size * self.n_envs)
         # Prepare the data
@@ -666,6 +765,10 @@ class RolloutBufferSteps(RolloutBuffer):
                 "non_zero_action_counter",
                 "episodic_step",  # Adds info for step in episode
                 "last_non_zero_action_step",  #Track last time there were no actions
+                "nitrogen_efficiency",
+                "nitrogen_surplus",
+                "end_of_episode_mask",
+                "dvs"
             ]
 
             for tensor in _tensor_names:
@@ -678,13 +781,13 @@ class RolloutBufferSteps(RolloutBuffer):
 
         start_idx = 0
         while start_idx < self.buffer_size * self.n_envs:
-            yield self._get_samples(indices[start_idx : start_idx + batch_size])
+            yield self._get_samples(indices[start_idx: start_idx + batch_size])
             start_idx += batch_size
 
     def _get_samples(
-        self,
-        batch_inds: np.ndarray,
-        env=None,
+            self,
+            batch_inds: np.ndarray,
+            env=None,
     ) -> RolloutBufferSamplesStep:
         data = (
             self.observations[batch_inds],
@@ -700,6 +803,10 @@ class RolloutBufferSteps(RolloutBuffer):
             self.non_zero_action_counter[batch_inds].flatten(),
             self.episodic_step[batch_inds].flatten(),
             self.last_non_zero_action_step[batch_inds].flatten(),
+            self.nitrogen_efficiency[batch_inds].flatten(),
+            self.nitrogen_surplus[batch_inds].flatten(),
+            self.end_of_episode_mask[batch_inds].flatten(),
+            self.dvs[batch_inds].flatten(),
         )
         return RolloutBufferSamplesStep(*tuple(map(self.to_torch, data)))
 
@@ -754,6 +861,18 @@ class CostActorCriticPolicy(ActorCriticPolicy):
         # Setup optimizer with initial learning rate
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
+    def _build_mlp_extractor(self) -> None:
+        """
+        Create the policy and value networks.
+        Part of the layers can be shared.
+        """
+        self.mlp_extractor = CostMlpExtractor(
+            self.features_dim,
+            net_arch=self.net_arch,
+            activation_fn=self.activation_fn,
+            device=self.device,
+        )
+
     def forward(self, obs: th.Tensor, deterministic: bool = False):
         """
         Forward pass in all the networks (actor, value critic, and cost critic)
@@ -764,15 +883,16 @@ class CostActorCriticPolicy(ActorCriticPolicy):
         """
         features = self.extract_features(obs)
         if self.share_features_extractor:
-            latent_pi, latent_vf = self.mlp_extractor(features)
+            latent_pi, latent_vf, latent_cf = self.mlp_extractor(features)
         else:
-            pi_features, vf_features = features
+            pi_features, vf_features, cf_features = features
             latent_pi = self.mlp_extractor.forward_actor(pi_features)
             latent_vf = self.mlp_extractor.forward_critic(vf_features)
+            latent_cf = self.mlp_extractor.forward_cost_critic(cf_features)
 
         # Evaluate the values for the given observations
         values = self.value_net(latent_vf)
-        cost_values = self.cost_value_net(latent_vf)  # Cost estimation
+        cost_values = self.cost_value_net(latent_cf)  # Cost estimation
 
         distribution = self._get_action_dist_from_latent(latent_pi)
         actions = distribution.get_actions(deterministic=deterministic)
@@ -793,19 +913,42 @@ class CostActorCriticPolicy(ActorCriticPolicy):
         """
         features = self.extract_features(obs)
         if self.share_features_extractor:
-            latent_pi, latent_vf = self.mlp_extractor(features)
+            latent_pi, latent_vf, latent_cf = self.mlp_extractor(features)
         else:
-            pi_features, vf_features = features
+            pi_features, vf_features, cf_features = features
             latent_pi = self.mlp_extractor.forward_actor(pi_features)
             latent_vf = self.mlp_extractor.forward_critic(vf_features)
+            latent_cf = self.mlp_extractor.forward_cost_critic(cf_features)
 
         distribution = self._get_action_dist_from_latent(latent_pi)
         log_prob = distribution.log_prob(actions)
         values = self.value_net(latent_vf)
-        cost_values = self.cost_value_net(latent_vf)  # Cost estimation
+        cost_values = self.cost_value_net(latent_cf)  # Cost estimation
         entropy = distribution.entropy()
 
         return values, cost_values, log_prob, entropy
+
+    # def extract_features(  # type: ignore[override]
+    #     self, obs, features_extractor=None
+    # ) -> Union[th.Tensor, Tuple[th.Tensor, th.Tensor]]:
+    #     """
+    #     Preprocess the observation if needed and extract features.
+    #
+    #     :param obs: Observation
+    #     :param features_extractor: The features extractor to use. If None, then ``self.features_extractor`` is used.
+    #     :return: The extracted features. If features extractor is not shared, returns a tuple with the
+    #         features for the actor and the features for the critic.
+    #     """
+    #     if self.share_features_extractor:
+    #         return super().extract_features(obs, self.features_extractor if features_extractor is None else features_extractor)
+    #     else:
+    #         if features_extractor is not None:
+    #             print('features_extractor is not shared, so it will be ignored')
+    #
+    #         pi_features = super().extract_features(obs, self.pi_features_extractor)
+    #         vf_features = super().extract_features(obs, self.vf_features_extractor)
+    #         cf_features = super().extract_features(obs, self.vf_features_extractor)
+    #         return pi_features, vf_features, cf_features
 
     def predict_values(self, obs):
         """
@@ -814,23 +957,24 @@ class CostActorCriticPolicy(ActorCriticPolicy):
         :param obs: Observation
         :return: a tuple containing the estimated value and cost value.
         """
-        features = super().extract_features(obs, self.vf_features_extractor)
+        features = super(ActorCriticPolicy, self).extract_features(obs, self.vf_features_extractor)
 
         # Check if the features are returned as a tuple (for separate actor and critic features)
         if self.share_features_extractor:
             latent_vf = self.mlp_extractor(features)[1]  # Use the critic's features
+            latent_cf = self.mlp_extractor(features)[2]
         else:
-            pi_features, vf_features = features
+            pi_features, vf_features, cf_features = features
             latent_vf = self.mlp_extractor.forward_critic(vf_features)  # Use vf_features for the critic
+            latent_cf = self.mlp_extractor.forward_cost_critic(cf_features)
 
         # Standard value estimation
         values = self.value_net(latent_vf)
 
         # Cost value estimation
-        cost_values = self.cost_value_net(latent_vf)
+        cost_values = self.cost_value_net(latent_cf)
 
         return values, cost_values
-
 
 
 class Lagrange:
@@ -915,3 +1059,300 @@ class Lagrange:
             0.0,
             self.lagrangian_upper_bound,
         )  # enforce: lambda in [0, inf]
+
+
+class CostMlpExtractor(nn.Module):
+    """
+    Constructs an MLP that receives the output from a previous features extractor (i.e. a CNN) or directly
+    the observations (if no features extractor is applied) as an input and outputs a latent representation
+    for the policy, value network, and cost value network.
+
+    The ``net_arch`` parameter allows to specify the amount and size of the hidden layers.
+    It can be in either of the following forms:
+    1. ``dict(vf=[<list of layer sizes>], pi=[<list of layer sizes>], cf=[<list of layer sizes>])``:
+       to specify the amount and size of the layers in the policy, value, and cost nets individually.
+       If it is missing any of the keys (pi, vf, cf), zero layers will be considered for that key.
+    2. ``[<list of layer sizes>]``: "shortcut" in case the amount and size of the layers
+       in the policy, value, and cost nets are the same. Same as ``dict(vf=int_list, pi=int_list, cf=int_list)``
+       where int_list is the same for the actor, critic, and cost networks.
+
+    .. note::
+        If a key is not specified or an empty list is passed ``[]``, a linear network will be used.
+
+    :param feature_dim: Dimension of the feature vector (can be the output of a CNN)
+    :param net_arch: The specification of the policy, value, and cost networks.
+        See above for details on its formatting.
+    :param activation_fn: The activation function to use for the networks.
+    :param device: PyTorch device.
+    """
+
+    def __init__(
+            self,
+            feature_dim: int,
+            net_arch,
+            activation_fn,
+            device: Union[th.device, str] = "auto",
+    ) -> None:
+        super().__init__()
+        device = get_device(device)
+        policy_net = []
+        value_net = []
+        cost_value_net = []
+        last_layer_dim_pi = feature_dim
+        last_layer_dim_vf = feature_dim
+        last_layer_dim_cf = feature_dim
+
+        # Save dimensions of layers in policy, value, and cost value nets
+        if isinstance(net_arch, dict):
+            pi_layers_dims = net_arch.get("pi", [])  # Layer sizes of the policy network
+            vf_layers_dims = net_arch.get("vf", [])  # Layer sizes of the value network
+            cf_layers_dims = net_arch.get("vf", [])  # Layer sizes of the cost value network
+        else:
+            pi_layers_dims = vf_layers_dims = cf_layers_dims = net_arch
+
+        # Build the policy network
+        for curr_layer_dim in pi_layers_dims:
+            policy_net.append(nn.Linear(last_layer_dim_pi, curr_layer_dim))
+            policy_net.append(activation_fn())
+            last_layer_dim_pi = curr_layer_dim
+
+        # Build the value network
+        for curr_layer_dim in vf_layers_dims:
+            value_net.append(nn.Linear(last_layer_dim_vf, curr_layer_dim))
+            value_net.append(activation_fn())
+            last_layer_dim_vf = curr_layer_dim
+
+        # Build the cost value network
+        for curr_layer_dim in cf_layers_dims:
+            cost_value_net.append(nn.Linear(last_layer_dim_cf, curr_layer_dim))
+            cost_value_net.append(activation_fn())
+            last_layer_dim_cf = curr_layer_dim
+
+        # Save dim, used to create the distributions and final layers
+        self.latent_dim_pi = last_layer_dim_pi
+        self.latent_dim_vf = last_layer_dim_vf
+        self.latent_dim_cf = last_layer_dim_cf
+
+        # Create networks
+        self.policy_net = nn.Sequential(*policy_net).to(device)
+        self.value_net = nn.Sequential(*value_net).to(device)
+        self.cost_value_net = nn.Sequential(*cost_value_net).to(device)
+
+    def forward(self, features: th.Tensor):
+        """
+        :return: latent_policy, latent_value, latent_cost_value of the specified network.
+            If all layers are shared, then `latent_policy == latent_value == latent_cost_value`
+        """
+        return (
+            self.forward_actor(features),
+            self.forward_critic(features),
+            self.forward_cost_critic(features)
+        )
+
+    def forward_actor(self, features: th.Tensor) -> th.Tensor:
+        return self.policy_net(features)
+
+    def forward_critic(self, features: th.Tensor) -> th.Tensor:
+        return self.value_net(features)
+
+    def forward_cost_critic(self, features: th.Tensor) -> th.Tensor:
+        return self.cost_value_net(features)
+
+
+class RolloutBufferNitrogen(RolloutBufferSteps):
+    episodic_step: np.ndarray
+    non_zero_action_counter: np.ndarray
+    costs: np.ndarray
+    costs_values: np.ndarray
+
+    def __init__(self, buffer_size, observation_space, action_space, device='cpu', gae_lambda=1, gamma=0.99, n_envs=1,
+                 **kwargs):
+        super().__init__(buffer_size, observation_space, action_space, device, gae_lambda, gamma, n_envs, **kwargs)
+        self.nitrogen_efficiency = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.nitrogen_surplus = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+
+    def reset(self):
+        """
+        Reset the rollout buffer and step counters.
+        """
+        super(RolloutBufferNitrogen, self).reset()
+        self.nitrogen_efficiency = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.nitrogen_surplus = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+
+    def add_nitrogen_info(self, nue, n_surplus):
+        """
+        Add Nitrogen Use Efficiency (NUE) and N Surplus information to the buffer.
+        """
+        self.nitrogen_efficiency[self.pos] = nue
+        self.nitrogen_surplus[self.pos] = n_surplus
+
+    def add(self,
+            obs: np.ndarray,
+            action: np.ndarray,
+            reward: np.ndarray,
+            episode_start: np.ndarray,
+            value: th.Tensor,
+            cost_value: th.Tensor,
+            log_prob: th.Tensor,
+            ) -> None:
+        """
+        :param obs: Observation
+        :param action: Action
+        :param reward:
+        :param episode_start: Start of episode signal.
+        :param value: estimated value of the current state
+            following the current policy.
+        :param log_prob: log probability of the action
+            following the current policy.
+        """
+        if len(log_prob.shape) == 0:
+            # Reshape 0-d tensor to avoid error
+            log_prob = log_prob.reshape(-1, 1)
+
+        # Reshape needed when using multiple envs with discrete observations
+        # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+        if isinstance(self.observation_space, spaces.Discrete):
+            obs = obs.reshape((self.n_envs, *self.obs_shape))
+
+        # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
+        action = action.reshape((self.n_envs, self.action_dim))
+
+        self.observations[self.pos] = np.array(obs)
+        self.actions[self.pos] = np.array(action)
+        self.rewards[self.pos] = np.array(reward)
+        self.episode_starts[self.pos] = np.array(episode_start)
+        self.values[self.pos] = value.clone().cpu().numpy().flatten()
+        self.cost_values[self.pos] = cost_value.clone().cpu().numpy().flatten()
+        self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
+
+        if not self.episode_starts[self.pos][0]:
+            self.step_counter += 1
+        else:
+            self.step_counter = 0
+        self.episodic_step[self.pos] = self.step_counter
+
+        if len(self.episode_costs) == 0:
+            self.episode_costs = [[] for _ in range(self.n_envs)]
+
+        # Increment non_zero_action_counter and calculate costs
+        for i in range(self.n_envs):
+            if self.actions[self.pos][i] > 0:
+                self.non_zero_action_counter[self.pos][i] = self.non_zero_action_counter[self.pos - 1][i] + 1
+                self.last_non_zero_action_step[self.pos][i] = self.episodic_step[self.pos][i]
+            # elif self.actions[self.pos][i] == 0 and self.last_non_zero_action_step[self.pos][i] == 0:
+            else:
+                self.non_zero_action_counter[self.pos][i] = self.non_zero_action_counter[self.pos - 1][i]
+                self.last_non_zero_action_step[self.pos][i] = self.last_non_zero_action_step[self.pos - 1][i]
+                # self.last_non_zero_action_step[self.pos][i] = self.step_counter[i]
+
+            self.costs[self.pos][i] = np.sum(self.calculate_costs(self.actions[self.pos][i],
+                                                                  self.episodic_step[self.pos][i],
+                                                                  self.non_zero_action_counter[self.pos][i],
+                                                                  self.last_non_zero_action_step[self.pos][i]))
+
+            # If this is the start of a new episode, initialize tracking for costs
+            if self.episode_starts[self.pos][i]:
+                self.episode_costs[i].append([])
+
+            # Ensure there's a list to append the cost to
+            if len(self.episode_costs[i]) == 0:
+                self.episode_costs[i].append([])
+
+            # Accumulate the cost for the current episode
+            self.episode_costs[i][-1].append(self.costs[self.pos][i])
+
+        # Reset counters in new episodes
+        for idx in range(self.n_envs):
+            if self.episode_starts[self.pos][idx]:
+                # self.step_counter[idx] = 0
+                self.non_zero_action_counter[self.pos][idx] = 0
+                self.last_non_zero_action_step[self.pos][idx] = 0
+        self.pos += 1
+        if self.pos == self.buffer_size:
+            self.full = True
+
+    def get_costs_per_episode(self):
+        """
+        Get a list of total costs per episode for each environment, discarding episodes shorter than the mean length.
+
+        Returns:
+            List[List[float]]: A list where each element is a list of total costs for each valid episode in a particular environment.
+        """
+        # Calculate the mean episode length across all environments and episodes
+        all_episode_lengths = [
+            len(episode) for env_episodes in self.episode_costs for episode in env_episodes
+        ]
+        mean_episode_length = np.mean(all_episode_lengths)
+
+        # Sum the costs within each episode for each environment, discarding short episodes
+        total_costs_per_env = []
+        for env_episodes in self.episode_costs:
+            env_costs = []
+            for episode in env_episodes:
+                if len(episode) >= mean_episode_length:
+                    env_costs.append(np.sum(episode))
+            total_costs_per_env.append(env_costs)
+
+        return total_costs_per_env
+
+    def get(self, batch_size=None):
+        assert self.full, ""
+        indices = np.random.permutation(self.buffer_size * self.n_envs)
+        # Prepare the data
+        if not self.generator_ready:
+            _tensor_names = [
+                "observations",
+                "actions",
+                "values",
+                "log_probs",
+                "advantages",
+                "cost_advantages",
+                "returns",
+                "costs",
+                "cost_values",
+                "cost_returns",
+                "non_zero_action_counter",
+                "episodic_step",  # Adds info for step in episode
+                "last_non_zero_action_step",  #Track last time there were no actions
+            ]
+
+            for tensor in _tensor_names:
+                self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
+            self.generator_ready = True
+
+        # Return everything, don't create minibatches
+        if batch_size is None:
+            batch_size = self.buffer_size * self.n_envs
+
+        start_idx = 0
+        while start_idx < self.buffer_size * self.n_envs:
+            yield self._get_samples(indices[start_idx: start_idx + batch_size])
+            start_idx += batch_size
+
+    def _get_samples(
+            self,
+            batch_inds: np.ndarray,
+            env=None,
+    ) -> RolloutBufferSamplesStep:
+        data = (
+            self.observations[batch_inds],
+            self.actions[batch_inds],
+            self.values[batch_inds].flatten(),
+            self.log_probs[batch_inds].flatten(),
+            self.advantages[batch_inds].flatten(),
+            self.cost_advantages[batch_inds].flatten(),
+            self.returns[batch_inds].flatten(),
+            self.costs[batch_inds].flatten(),
+            self.cost_values[batch_inds].flatten(),
+            self.cost_returns[batch_inds].flatten(),
+            self.non_zero_action_counter[batch_inds].flatten(),
+            self.episodic_step[batch_inds].flatten(),
+            self.last_non_zero_action_step[batch_inds].flatten(),
+        )
+        return RolloutBufferSamplesStep(*tuple(map(self.to_torch, data)))
+
+    def get_episodic_step(self, env_idx=0):
+        """
+        Get the current step number for a specific environment.
+        """
+        return self.step_counter[env_idx]
