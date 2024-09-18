@@ -225,7 +225,11 @@ def evaluate_policy(
             if isinstance(policy, base_class.BaseAlgorithm):
                 device = policy.device.type
                 if isinstance(policy, LagrangianPPO):
-                    action, state = policy.predict(obs, state=state, deterministic=deterministic)
+                    action, state = policy.predict(obs,
+                                                   state=state,
+                                                   deterministic=deterministic,
+                                                   episode_start=episode_starts,
+                                                   )
                     if 'cuda' in device:
                         sb_actions, sb_values, sb_cost_values, sb_log_probs = policy.policy(torch.from_numpy(obs).to(device),
                                                                             deterministic=deterministic)
@@ -233,10 +237,11 @@ def evaluate_policy(
                         sb_val = sb_values.detach().cpu().item()
                         sb_cost_values = sb_cost_values.detach().cpu().item()
                     else:
-                        sb_actions, sb_values, sb_log_probs = policy.policy(torch.from_numpy(obs),
+                        sb_actions, sb_values, sb_cost_values, sb_log_probs = policy.policy(torch.from_numpy(obs),
                                                                             deterministic=deterministic)
                         sb_prob = np.exp(sb_log_probs.detach().numpy()).item()
                         sb_val = sb_values.detach().item()
+                        sb_cost_values = sb_cost_values.detach().cpu().item()
                     prob = sb_prob
                     val = sb_val
                     cost_val = sb_cost_values
@@ -522,7 +527,7 @@ class FindOptimum():
         print(f"Start Optimizing constrained episode for year {eval_year} {'limited to 4 actions' if limited is True else ''}!")
 
         start_time = time.time()
-        res = dual_annealing(objective, bounds, x0=initial_guess)
+        res = dual_annealing(objective, bounds) # , x0=initial_guess)
         # res = differential_evolution(objective, bounds, strategy='best1bin', maxiter=1000, popsize=15, tol=0.01)
         # res = minimize(objective, initial_guess, bounds=bounds, method='L-BFGS-B')
         end_time = time.time()
@@ -1088,6 +1093,19 @@ class EvalCallback(BaseCallback):
     def _on_training_end(self) -> None:
         if self.kl_target is not None:
             print(f"Early stopping at step {self.num_timesteps}")
+
+        model_path = os.path.join(self.logger.dir, f'latest-model.zip')
+        self.model.save(model_path)
+        if not self.env_eval.envs[0].unwrapped.normalize:
+            stats_path = os.path.join(self.logger.dir, f'latest-env.pkl')
+            self.model.get_env().save(stats_path)
+        if self.comet_experiment is not None:
+            self.comet_experiment.log_asset(file_data=os.path.join(self.logger.dir, f'latest-env.pkl'),
+                                            step=self.num_timesteps,
+                                            file_name=f'latest-env.pkl')
+            self.comet_experiment.log_model(self.comet_experiment.get_name(),
+                                            os.path.join(self.logger.dir, f'latest-model.zip'),
+                                            file_name=f'latest-model.zip')
 
 
 
