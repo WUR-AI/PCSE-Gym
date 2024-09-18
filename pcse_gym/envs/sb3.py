@@ -192,6 +192,9 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
             self.pcse_env = 1
         elif 'SNOMIN' in kwargs.get('model_config'):
             self.pcse_env = 2
+        self.week = 0
+        self.n_action = 0
+        self.steps_since_last_zero = 0
         super().__init__(timestep=timestep, years=years, location=location, *args, **kwargs)
         self.action_space = action_space
         self.action_multiplier = action_multiplier
@@ -224,6 +227,8 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
             nvars = len(self.crop_features)
         else:
             nvars = len(self.crop_features) + len(self.action_features) + len(self.weather_features) * self.timestep
+            # if self.week is not None:
+            #     nvars = nvars + 1
         if self.mask_binary:
             nvars = nvars + len(self.po_features)
         return gym.spaces.Box(-np.inf, np.inf, shape=(nvars,))
@@ -281,10 +286,20 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
                 info['indexes'] = OrderedDict()
             info['indexes'] = self.index_feature
 
+        # for constraints
+        self.week += 1
+        self.n_action += 1 if action > 0 else 0
+        self.steps_since_last_zero += 1 if action == 0 else 0
+        if action > 0:
+            self.steps_since_last_zero = 0
+
         return observation, reward, terminated, truncated, info
 
     def reset(self, seed=None, return_info=False, options=None):
         self.step_check = False
+        self.week = 0
+        self.n_action = 0
+        self.steps_since_last_zero = 0
         obs = super().reset(seed=seed, options=options)
         if isinstance(obs, tuple):
             obs = obs[0]
@@ -314,6 +329,12 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
                         obs[i] = np.mean(observation['crop_model'][feature][-1])
                 elif feature in ['RNO3DEPOSTT', 'RNH4DEPOSTT']:
                     obs[i] = observation['crop_model'][feature][-1] / m2_to_ha
+                elif feature in ['week']:
+                    obs[i] = self.week
+                elif feature in ['Naction']:
+                    obs[i] = self.n_action
+                elif feature in ['last_zero_action']:
+                    obs[i] = self.steps_since_last_zero
                 else:
                     obs[i] = observation['crop_model'][feature][-1]
 
@@ -377,10 +398,10 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
             if n <= 0:
                 return []
 
-            action_space = [0, 3]
+            action_space = [0, 4]
 
             for i in range(2, n):
-                action_space.append(3 + (i - 1) * .5)
+                action_space.append(4 + (i - 1) * .5)
 
             return action_space
         else:
