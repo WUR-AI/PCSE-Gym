@@ -183,6 +183,25 @@ class Rewards:
             reward = growth - costs
             return reward, growth
 
+    class LOS(Rew):
+        """
+        Absolute growth reward function with N loss penalty, modified from Kallenberg et al. (2023)
+        """
+
+        def __init__(self, timestep, costs_nitrogen):
+            super().__init__(timestep, costs_nitrogen)
+            self.timestep = timestep
+            self.costs_nitrogen = costs_nitrogen
+
+        def return_reward(self, output, amount, output_baseline=None, multiplier=1, obj=None):
+            obj.calculate_amount(amount)
+            growth = process_pcse.compute_growth_storage_organ(output, self.timestep, multiplier)
+            costs = self.costs_nitrogen * amount
+            loss = process_pcse.compute_growth_var(output, self.timestep, 'NLOSSCUM')
+            costs_loss = self.costs_nitrogen * loss
+            reward = growth - costs - costs_loss
+            return reward, growth
+
     class DEP(Rew):
         """
         Reward function that considers a realistic (financial) cost of DT deployment in a field

@@ -145,6 +145,9 @@ class WinterWheat(gym.Env):
         elif self.reward_function == 'GRO':
             self.reward_class = self.rewards_obj.GRO(self.timestep, costs_nitrogen)
 
+        elif self.reward_function == 'LOS':
+            self.reward_class = self.rewards_obj.LOS(self.timestep, costs_nitrogen)
+
         elif self.reward_function == 'DEP':
             self.reward_class = self.rewards_obj.DEP(self.timestep, costs_nitrogen)
 
