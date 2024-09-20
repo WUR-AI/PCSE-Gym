@@ -195,6 +195,7 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         self.week = 0
         self.n_action = 0
         self.steps_since_last_zero = 0
+        self.dvs = 0
         super().__init__(timestep=timestep, years=years, location=location, *args, **kwargs)
         self.action_space = action_space
         self.action_multiplier = action_multiplier
@@ -292,6 +293,7 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         self.steps_since_last_zero += 1 if action == 0 else 0
         if action > 0:
             self.steps_since_last_zero = 0
+        self.dvs = obs['crop_model']['DVS'][-1]
 
         return observation, reward, terminated, truncated, info
 
@@ -300,6 +302,7 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         self.week = 0
         self.n_action = 0
         self.steps_since_last_zero = 0
+        self.dvs = 0
         obs = super().reset(seed=seed, options=options)
         if isinstance(obs, tuple):
             obs = obs[0]

@@ -86,6 +86,7 @@ def args_func(parser):
     parser.add_argument("--regl1", type=float, default=0.0, dest='regl1')
     parser.add_argument("--irs", type=str, default=None, dest='irs')
     parser.add_argument("--discrete-space", type=int, default=None, dest='discrete_space')
+    parser.add_argument("--temporal-constraint", type=bool, default=False, dest='temporal_constraint')
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3',
                         no_weather=False, random_feature=False, obs_mask=False, placeholder_val=-1.11,
                         normalize=False, random_init=False, m_multiplier=1, measure_all=False, random_weather=False,
@@ -266,6 +267,7 @@ def train(log_dir, n_steps,
     regl2 = kwargs.get('regl2')
     regl1 = kwargs.get('regl1')
     irs = kwargs.get('irs')
+    temporal_constraint = kwargs.get('temporal_constraint')
 
     from stable_baselines3 import PPO, DQN, A2C
     from stable_baselines3.common.monitor import Monitor
@@ -291,7 +293,7 @@ def train(log_dir, n_steps,
 
     env_pcse_train = Monitor(env_pcse_train)
 
-    env_pcse_train = ActionConstrainer(env_pcse_train, action_limit=action_limit, n_budget=n_budget)
+    env_pcse_train = ActionConstrainer(env_pcse_train, action_limit=action_limit, n_budget=n_budget, temporal=temporal_constraint)
 
     device = kwargs.get('device')
     if device == 'cuda':
@@ -499,7 +501,7 @@ if __name__ == '__main__':
               'random_weather': args.random_weather, 'comet': args.comet, 'n_envs': args.nenvs, 'vision': args.vision,
               'masked_ac': args.masked_ac, 'decay_entropy': args.decay_entropy, 'nsteps': args.nsteps,
               'mask_later': args.mask_later, 'regl2': args.regl2, 'regl1': args.regl1, 'irs': args.irs,
-              'discrete_space': args.discrete_space, }
+              'discrete_space': args.discrete_space, 'temporal_constraint': args.temporal_constraint}
 
     if args.decay_entropy:
         print('Training with entropy decay')
