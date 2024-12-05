@@ -172,7 +172,7 @@ class WinterWheat(gym.Env):
 
         elif self.reward_function == 'HAR':
             self.yield_modifier = 0.2
-            self.reward_class = self.rewards_obj.HAR(self.timestep, costs_nitrogen, 200, 20, 1)
+            self.reward_class = self.rewards_obj.HAR(self.timestep, costs_nitrogen, 200, 5, 1)
             self.reward_container = self.rewards_obj.ContainerEND(self.timestep, costs_nitrogen)
 
         elif self.reward_function == 'DNU':
@@ -373,8 +373,8 @@ class WinterWheat(gym.Env):
         return site_parameters
 
     def init_random_init_conditions_params(self):
-        self.mean_total_N = 35  # kg/ha
-        self.std_dev_total_N = 15  # kg/ha
+        self.mean_total_N = 50  # kg/ha
+        self.std_dev_total_N = 35  # kg/ha
         self.percentage_NO3 = 0.85
         self.percentage_NH4 = 0.15
         self.top_30cm_fraction = 0.7
@@ -390,10 +390,8 @@ class WinterWheat(gym.Env):
 
         '''Comments for sanity check'''
         # Generate total inorganic N from seeded normal distribution and clip so that no outliers become negative
-        # total_inorganic_n = self.rng.normal(self.mean_total_N, self.std_dev_total_N)
-        total_inorganic_n = 5
+        total_inorganic_n = self.rng.normal(self.mean_total_N, self.std_dev_total_N)
         total_inorganic_n = np.clip(total_inorganic_n, 0, 100)
-
 
         # Split total inorganic N into NO3 and NH4
         total_no3 = total_inorganic_n * self.percentage_NO3
@@ -442,10 +440,10 @@ class WinterWheat(gym.Env):
         # Only for invalid action masking
         self.reset_non_zero_action_count()
 
+        site_params = self.special_init_conditions()
+
         if isinstance(options, dict):
-            site_params = options
-        else:
-            site_params = self.special_init_conditions()
+            site_params = self.special_init_conditions() | options
 
         if isinstance(self.years, list):
             year = self.np_random.choice(self.years)

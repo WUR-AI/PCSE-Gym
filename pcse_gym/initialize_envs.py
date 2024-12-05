@@ -20,7 +20,7 @@ def initialize_env(pcse_env=1, po_features=[],
                    action_limit=0, noisy_measure=False, n_budget=0, no_weather=False, framework='sb3',
                    mask_binary=False, random_weather=False, weather_features=defaults.get_default_weather_features(),
                    placeholder_val=-1.11, normalize=False, loc_code='NL', cost_measure='real', start_type='sowing',
-                   random_init=False, m_multiplier=1, measure_all=False, seed=None):
+                   random_init=False, m_multiplier=1, measure_all=False, seed=None, soil=None):
     if add_random:
         po_features.append('random'), crop_features.append('random')
     action_space = get_action_space(nitrogen_levels=nitrogen_levels, po_features=po_features)
@@ -39,7 +39,7 @@ def initialize_env(pcse_env=1, po_features=[],
                                  action_space=action_space,
                                  action_multiplier=action_multiplier,
                                  reward=reward,
-                                 **get_model_kwargs(pcse_env, locations, start_type=kwargs.get('start_type', 'sowing')),
+                                 **get_model_kwargs(pcse_env, locations, soil=soil, start_type=kwargs.get('start_type', 'sowing')),
                                  **kwargs, seed=seed)
     elif framework == 'rllib':
         from pcse_gym.utils.rllib_helpers import ww_lim, winterwheat_config_maker

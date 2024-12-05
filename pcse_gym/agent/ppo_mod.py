@@ -55,10 +55,7 @@ class LagrangianPPO(PPO):
     def __init__(self, *args, constraint_fn=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.constraint_fn = constraint_fn
-        if self.n_envs > 1:
-            self.non_zero_action_counter = np.zeros(self.n_envs)
-        else:
-            self.non_zero_action_counter = 0
+        self.non_zero_action_counter = 0
         self.mean_approx_kl = None
         self.cost_vf_coef = 0.7
         self.lagrange = Lagrange(cost_limit=0.0, lagrangian_multiplier_init=0.001, lagrangian_multiplier_lr=0.0005,
@@ -739,10 +736,6 @@ class RolloutBufferSteps(RolloutBuffer):
         # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
         # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
 
-        # Combine reward and cost advantages using Lagrange multiplier
-        # advantage = self.advantages - self.lagrange.lagrangian_multiplier * self.cost_advantages
-        # advantage /= (self.lagrange.lagrangian_multiplier + 1)
-
         self.returns = self.advantages + self.values
         self.cost_returns = self.cost_advantages + self.cost_values
 
@@ -928,28 +921,6 @@ class CostActorCriticPolicy(ActorCriticPolicy):
 
         return values, cost_values, log_prob, entropy
 
-    # def extract_features(  # type: ignore[override]
-    #     self, obs, features_extractor=None
-    # ) -> Union[th.Tensor, Tuple[th.Tensor, th.Tensor]]:
-    #     """
-    #     Preprocess the observation if needed and extract features.
-    #
-    #     :param obs: Observation
-    #     :param features_extractor: The features extractor to use. If None, then ``self.features_extractor`` is used.
-    #     :return: The extracted features. If features extractor is not shared, returns a tuple with the
-    #         features for the actor and the features for the critic.
-    #     """
-    #     if self.share_features_extractor:
-    #         return super().extract_features(obs, self.features_extractor if features_extractor is None else features_extractor)
-    #     else:
-    #         if features_extractor is not None:
-    #             print('features_extractor is not shared, so it will be ignored')
-    #
-    #         pi_features = super().extract_features(obs, self.pi_features_extractor)
-    #         vf_features = super().extract_features(obs, self.vf_features_extractor)
-    #         cf_features = super().extract_features(obs, self.vf_features_extractor)
-    #         return pi_features, vf_features, cf_features
-
     def predict_values(self, obs):
         """
         Get the estimated values and cost values according to the current policy given the observations.
@@ -977,6 +948,8 @@ class CostActorCriticPolicy(ActorCriticPolicy):
         return values, cost_values
 
 
+# Lagrange class taken from https://github.com/PKU-Alignment/safety-gymnasium,
+# paper Safety Gymnasium: A Unified Safe Reinforcement Learning Benchmark
 class Lagrange:
     """Lagrange multiplier for constrained optimization.
 

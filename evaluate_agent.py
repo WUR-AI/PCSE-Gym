@@ -117,7 +117,7 @@ def evaluate_treatment(policy, env, n_eval_episodes=1):
             for amount, fert_date in enumerate(fert_dates):
                 if fert_date < date <= fert_date + datetime.timedelta(7):
                     action = fert_amounts[amount] / 10
-                    # print(f"fertilized {action} at {fert_date}")
+                    print(f"fertilized {action} at {fert_date}")
             obs, reward, terminated, truncated, info = env.step(action)
 
             episode_reward += reward
@@ -135,9 +135,31 @@ def evaluate_treatment(policy, env, n_eval_episodes=1):
     return episode_rewards, episode_infos
 
 
-def get_demeter_policy(location, year, constrained=True):
+def get_demeter_policy(location, year, soil=None, init_n=None, constrained=True):
     if constrained:
-        with open(os.path.join(rootdir, "ceres_results", 'constrained', f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+        if soil is not None:
+            if 'fast' in soil:
+                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_fast_soil',
+                                       f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+                    df_ceres = pd.read_csv(file, header=0)
+                return list(df_ceres[str(year)])
+            elif 'slo' in soil:
+                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_slow_soil',
+                                       f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+                    df_ceres = pd.read_csv(file, header=0)
+                return list(df_ceres[str(year)])
+        if init_n is not None:
+            if 'low' in init_n:
+                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_low_n',
+                                       f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+                    df_ceres = pd.read_csv(file, header=0)
+                return list(df_ceres[str(year)])
+            elif 'high' in init_n:
+                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_high_n',
+                                       f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+                    df_ceres = pd.read_csv(file, header=0)
+                return list(df_ceres[str(year)])
+        with open(os.path.join(rootdir, "ceres_results", 'constrained_all', f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
             df_ceres = pd.read_csv(file, header=0)
         return list(df_ceres[str(year)])
     with open(os.path.join(rootdir, "ceres_results", f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
@@ -145,13 +167,13 @@ def get_demeter_policy(location, year, constrained=True):
     return list(df_ceres[str(year)])
 
 
-def evaluate_demeter(env, n_eval_episodes=1, constrained=True):
+def evaluate_demeter(env, n_eval_episodes=1, constrained=True, soil=None, init_n=None):
     episode_rewards, episode_infos = [], []
     for i in range(n_eval_episodes):
         episode_reward = 0
         terminated, truncated, prev_action, prev_reward, info = False, False, None, None, None
         infos_this_episode = []
-        fert_amounts = get_demeter_policy(env.loc, env.sb3_env.agmt.get_end_date.year, constrained=constrained)
+        fert_amounts = get_demeter_policy(env.loc, env.sb3_env.agmt.get_end_date.year, soil=soil, init_n=init_n, constrained=constrained)
         week = 0
         while not terminated or truncated:
             action = 0
@@ -193,11 +215,19 @@ def high_n_init() -> dict:
     return n_dict
 
 
+def mid_n_init() -> dict:
+    n_dict = {'NH4I': [1.7436090131474202, 1.0330637061144692, 1.411524101062196, 0.7287729016659076, 0.24795527588005897, 0.06906348892304397, 0.7491498279555974],
+              'NO3I': [7.09833746582459, 6.546983849224111, 10.087794000121118, 6.314227315758486, 0.4043760804573563, 0.48318121856756163, 2.969550520289376], }
+    return n_dict
+
+
 def select_init_n_scenario(starting_n):
     if starting_n == 'high':
         return high_n_init()
     elif starting_n == 'low':
         return low_n_init()
+    elif starting_n == 'mid':
+        return mid_n_init()
     else:
         return None
 
@@ -226,6 +256,8 @@ if __name__ == "__main__":
     parser.add_argument("--init-n", type=str, default=None, dest='init_n')
     parser.add_argument("--vision", type=str, default=None, dest='vision')
     parser.add_argument("-v", "--visualize", action='store_true', default=False, dest='visualize')
+    parser.add_argument('--experiment', type=str, default='main_model', help="Experiment name")
+    parser.add_argument('--soil', type=str, default=None)
     parser.set_defaults(measure=False, vrr=False, noisy_measure=False, framework='sb3', no_weather=False,
                         random_feature=False, random_weather=False)
     args = parser.parse_args()
@@ -237,6 +269,7 @@ if __name__ == "__main__":
     pcse_model = args.environment
 
     init_n = args.init_n
+    soil = args.soil
 
     if args.agent == 'demeter':
         eval_locations = [(52.57, 5.63)]
@@ -246,7 +279,7 @@ if __name__ == "__main__":
             else:
                 eval_year = args.year
         else:
-            eval_year = [1990]
+            eval_year = [*range(1983, 2022)]
     else:
         if args.location == "NL":
             """The Netherlands"""
@@ -276,6 +309,16 @@ if __name__ == "__main__":
     kwargs = {'args_vrr': args.vrr, 'action_limit': args.action_limit, 'noisy_measure': args.noisy_measure,
               'n_budget': args.n_budget, 'framework': args.framework, 'no_weather': args.no_weather,
               'random_weather': args.random_weather}
+
+    if soil is not None:
+        # import yaml
+        # config_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pcse_gym', 'envs', 'configs')
+        # if soil == "fast":
+        kwargs['soil'] = soil
+        # if soil == "slow":
+        #     kwargs['soil_params'] = yaml.safe_load(open(os.path.join(config_dir, 'soil', 'EC6-fine_soil.yaml')))
+
+
     if not args.measure:
         action_spaces = gym.spaces.Discrete(9)
     else:
@@ -296,19 +339,29 @@ if __name__ == "__main__":
         a_shape = [7] + [m_shape] * len(po_features)
         action_spaces = gym.spaces.MultiDiscrete(a_shape)
 
-    if os.path.isdir(os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)):
+    # check paths
+    if os.path.isdir(os.path.join(rootdir, "nue_experiments", args.experiment, args.checkpoint_path)):
+        checkpoint_folder = os.path.join(rootdir, "nue_experiments", args.experiment, args.checkpoint_path)
+    elif os.path.isdir(os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)):
+        print(f"{os.path.join(rootdir, 'nue_experiments', args.experiment, args.checkpoint_path)} is not a path.")
         checkpoint_folder = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)
     else:
+        print(f"{os.path.join(rootdir, 'nue_experiments', args.experiment, args.checkpoint_path)} and "
+              f"{os.path.isdir(os.path.join(rootdir, 'tensorboard_logs', framework_path, args.checkpoint_path))} is not a path.")
         os.mkdir(os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path))
         checkpoint_folder = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path)
 
-    if args.agent in ['PPO', 'RPPO', 'MaskedPPO']:
+    if args.agent in ['PPO', 'RPPO', 'MaskedPPO', 'LagPPO']:
         model_file_to_load = os.listdir(checkpoint_folder)
         model_zip_name = [a for a in model_file_to_load if a.endswith(".zip")][0]
-        env_pkl_name = [a for a in model_file_to_load if a.endswith(".pkl")][0]
-        checkpoint_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
-                                       model_zip_name)
-        stats_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
+        env_pkl_name = [a for a in model_file_to_load if 'env' in a][0]
+        if os.path.isdir(os.path.join(rootdir, "nue_experiments", args.experiment, args.checkpoint_path)):
+            checkpoint_path = os.path.join(checkpoint_folder, model_zip_name)
+            stats_path = os.path.join(checkpoint_folder, env_pkl_name)
+        else:
+            checkpoint_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
+                                           model_zip_name)
+            stats_path = os.path.join(rootdir, "tensorboard_logs", framework_path, args.checkpoint_path,
                                   env_pkl_name)
 
     agent = args.agent
@@ -327,6 +380,8 @@ if __name__ == "__main__":
         from sb3_contrib import RecurrentPPO
         from stable_baselines3.common.vec_env import VecEnv, VecNormalize, DummyVecEnv, sync_envs_normalization
         from stable_baselines3.common.monitor import Monitor
+        from sb3_contrib import MaskablePPO as MaskedPPO
+        from pcse_gym.agent.ppo_mod import LagrangianPPO as LagPPO
 
         nitrogen_levels = 9  # 0 - 80 kg/ha
         env = init_env(crop_features=crop_features,
@@ -338,9 +393,9 @@ if __name__ == "__main__":
                        nitrogen_levels=nitrogen_levels,
                        action_features=action_features,
                        **kwargs)
-        cust_objects = {"lr_schedule": lambda x: 0.0001, "clip_range": lambda x: 0.2,
+        cust_objects = {"lr_schedule": lambda x: 0.001, "clip_range": lambda x: 0.2,
                         "action_space": action_spaces}
-        if args.agent in ['PPO', 'RPPO', 'MaskedPPO']:
+        if args.agent in ['PPO', 'RPPO', 'MaskedPPO', 'LagPPO']:
             env = ActionConstrainer(env, action_limit=args.action_limit, n_budget=args.n_budget)
             env = DummyVecEnv([lambda: env])
             env = VecNormalize.load(stats_path, env)
@@ -351,12 +406,14 @@ if __name__ == "__main__":
                 agent = PPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
 
             elif args.agent == 'MaskedPPO':
-                from sb3_contrib import MaskablePPO as MaskedPPO
                 agent = MaskedPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
+            elif args.agent == 'LagPPO':
+                agent = LagPPO.load(checkpoint_path, custom_objects=cust_objects, device='cuda', print_system_info=True)
         policy = agent
 
+    print(policy.policy if not isinstance(policy, str) else policy)
     evaluate_dir = os.path.join(evaluate_dir, args.checkpoint_path)
-    writer = SummaryWriter(log_dir=evaluate_dir)
+    writer = SummaryWriter(log_dir=checkpoint_folder)
 
     reward, fertilizer, result_model, WSO, NUE, profit, Nsurplus, Nloss, action_idx = {}, {}, {}, {}, {}, {}, {}, {}, {}
 
@@ -378,7 +435,7 @@ if __name__ == "__main__":
                     env.overwrite_year(year)
                     env.overwrite_location(test_location)
                     env.reset(options=select_init_n_scenario(init_n))
-                    episode_rewards, episode_infos = evaluate_demeter(env=env)
+                    episode_rewards, episode_infos = evaluate_demeter(env=env, soil=soil, init_n=init_n)
                 else:
                     env.overwrite_year(year)
                     env.overwrite_location(test_location)
@@ -478,10 +535,20 @@ if __name__ == "__main__":
     keys_figure = [(a, b) for a in eval_year for b in eval_locations]
     results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
 
-    # pickle info for creating figures
-    name = args.agent
-    with open(os.path.join(evaluate_dir, f'infos_{name}.pkl'), 'wb') as f:
-        pickle.dump(results_figure, f)
+    print(keys_figure)
+    name = args.agent + (str(args.checkpoint_path) if args.agent == 'LagPPO' else '')
+    # pickle info for creating figures and evaluation
+    if init_n is None and soil is None:
+        with open(os.path.join(checkpoint_folder, f'infos_{name}.pkl'), 'wb') as f:
+            pickle.dump(results_figure, f)
+    elif init_n is not None and soil is None:
+        os.makedirs(os.path.join(checkpoint_folder, init_n), exist_ok=True)
+        with open(os.path.join(checkpoint_folder, init_n, f'infos_{name}.pkl'), 'wb') as f:
+            pickle.dump(results_figure, f)
+    elif init_n is None and soil is not None:
+        os.makedirs(os.path.join(checkpoint_folder, soil), exist_ok=True)
+        with open(os.path.join(checkpoint_folder, soil, f'infos_{name}.pkl'), 'wb') as f:
+            pickle.dump(results_figure, f)
 
     for i, variable in enumerate(variables):
         if variable not in results_figure[list(results_figure.keys())[0]][0].keys():

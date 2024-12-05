@@ -198,7 +198,7 @@ class Rewards:
             growth = process_pcse.compute_growth_storage_organ(output, self.timestep, multiplier)
             costs = self.costs_nitrogen * amount
             loss = process_pcse.compute_growth_var(output, self.timestep, 'NLOSSCUM')
-            costs_loss = self.costs_nitrogen * loss
+            costs_loss = 0.1 * loss
             reward = growth - costs - costs_loss
             return reward, growth
 

@@ -112,7 +112,7 @@ def get_config_dir():
 def get_wofost_kwargs(config_dir=get_config_dir(), soil_file='arminda_soil.yaml', agro_file='wheat_cropcalendar.yaml',
                       model_file='Wofost81_NWLP_MLWB_SNOMIN.conf', pcse_model=2):
     if pcse_model == 2:
-        soil_params = yaml.safe_load(open(os.path.join(config_dir, 'soil', 'arminda_soil.yaml')))
+        soil_params = yaml.safe_load(open(os.path.join(config_dir, 'soil', soil_file)))
         site_params = yaml.safe_load(open(os.path.join(config_dir, 'site', 'arminda_site.yaml')))
     else:
         soil_params = pcse.input.CABOFileReader(os.path.join(config_dir, 'soil', 'ec3.CAB'))
@@ -138,7 +138,7 @@ def get_lintul_kwargs(config_dir=get_config_dir()):
     return lintul_kwargs
 
 
-def get_model_kwargs(pcse_model, loc=defaults.get_default_location(), start_type='sowing'):
+def get_model_kwargs(pcse_model, loc=defaults.get_default_location(), soil=None, start_type='sowing'):
     if not isinstance(loc, list):
         loc = [loc]
 
@@ -152,7 +152,12 @@ def get_model_kwargs(pcse_model, loc=defaults.get_default_location(), start_type
         return get_wofost_kwargs(soil_file=soil_file, agro_file=agro_file, model_file=model_file, pcse_model=pcse_model)
     elif pcse_model == 2:
         model_file = 'Wofost81_NWLP_MLWB_SNOMIN.conf'
-        soil_file = 'arminda_soil.yaml'
+        if soil=='fast':
+            soil_file = 'EC1-coarse_soil.yaml'
+        elif soil=='slo':
+            soil_file = 'EC6-fine_soil.yaml'
+        else:
+            soil_file = 'arminda_soil.yaml'
         agro_file = 'wheat_cropcalendar.yaml'
         print(f'using agro file {agro_file} and soil file {soil_file} with WOFOST SNOMIN')
         return get_wofost_kwargs(soil_file=soil_file, agro_file=agro_file, model_file=model_file, pcse_model=pcse_model)

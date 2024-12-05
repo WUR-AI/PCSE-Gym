@@ -1,3 +1,5 @@
+import os.path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -499,7 +501,55 @@ def plot_var_vs_freq_scatter(results_dict, variable='measure_LAI', ax=None):
     return ax
 
 
-def plot_nue_template(show_graph_labels=False, size=(10, 8), max=300) -> plt:
+def weather_check(nso, nloss, n_up, navail):
+    import matplotlib.dates as mdates
+    from matplotlib.ticker import MaxNLocator
+    # get weather analysis for demeter
+
+    def get_k(year):
+        return 'demeter', (year, (52.57, 5.63))
+
+    def change_date(year):
+        start_date = datetime.date(year - 1, 10, 3)
+        end_date = datetime.date(year, 8, 20)
+
+        # Generate weekly date range
+        date_range = pd.date_range(start=start_date, end=end_date, freq='W-SUN').date
+
+        return date_range
+
+    dates = change_date(2020)
+
+    with open(os.path.join(os.path.dirname(__file__), 'weather_utils', 'weather_csv', 'weather1983-2021.csv'), 'r') as f:
+        weather_data = pd.read_csv(f)
+
+    weather_data['DAY'] = pd.to_datetime(weather_data['DAY'], format='%Y%m%d')
+    # weather_data['DAY'] = weather_data['DAY']
+
+    date_set = set(dates)
+
+    # Filter using a lambda function to check membership in date_set
+    filtered_weather_data = weather_data[weather_data['DAY'].isin(date_set)]
+
+    fig, ax = plt.subplots(5, 1, figsize=[8, 6])
+
+    ax[0].plot(dates, nso[get_k(2020)], label='NSO')
+    ax[1].plot(dates, nloss[get_k(2020)], label='N loss')
+    ax[2].plot(dates, n_up[get_k(2020)], label='N uptake')
+    ax[3].plot(dates, filtered_weather_data['RAIN'], label='Precipitation')
+    ax[4].plot(dates, navail[get_k(2020)], label='N soil availability')
+
+    for i, _ in enumerate(ax):
+        ax[i].xaxis.set_major_locator(mdates.MonthLocator())
+        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+        ax[i].yaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax[i].legend()
+
+    # plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+def plot_nue_template(show_graph_labels=False, size=(6, 6), max=300, get_return=True, ax=None) -> plt:
     l = max
 
     n_in = np.linspace(0, l, l)
@@ -512,67 +562,485 @@ def plot_nue_template(show_graph_labels=False, size=(10, 8), max=300) -> plt:
 
     # Desired minimum productivity (N output > 80 kg/ha/yr)
     min_productivity_output = np.full(n_in.shape, 80)
-    max_surplus_line = n_in - 80
+
+    max_surplus_line = n_in - 40
+
     max_surplus_line[max_surplus_line < 0] = 0
 
-    plt.figure(figsize=size)
-    plt.plot(n_in, n_output_50, 'k-', label='NUE = 50%' if show_graph_labels else '')
-    plt.plot(n_in, n_output_90, 'k-', label='NUE = 90%' if show_graph_labels else '')
-    plt.plot(n_in, min_productivity_output, 'k-.',
-             label='Desired minimum productivity (N output > 80 kg/ha/yr)' if show_graph_labels else '')
-    plt.plot(n_in, max_surplus_line, 'k:', label='Desired maximum N surplus < 80 kg/ha/yr' if show_graph_labels else '')
+    if not ax:
+        plt.figure(figsize=size)
 
-    plt.fill_between(n_in, 0, n_output_50, color='red', alpha=0.3, label='NUE very low (NUE < 50%): Risk of '
-                                                                         'inefficient N use' if show_graph_labels else '')
+        plt.plot(n_in, max_surplus_line, 'k:')  #, label='N surplus = 40 kg/ha/yr')
 
-    plt.fill_between(n_in, n_output_90, l, color='orange', alpha=0.3, label='NUE very high (NUE > 90%): Risk of soil '
-                                                                            'mining' if show_graph_labels else '')
+        plt.fill_between(n_in, n_output_50, max_surplus_line, color='yellow',
+                         alpha=0.5)  #, label='N surplus > 40 kg/ha/yr')
 
-    plt.fill_between(n_in, n_output_50, max_surplus_line, color='yellow', alpha=0.5,
-                     label='Desired maximum surplus (N input - N output)' if show_graph_labels else '')
+        plt.plot(n_in, n_output_50, 'k--')  #, label='NUE = 50%')
 
-    return plt
+        plt.plot(n_in, n_output_90, 'k-')  #, label='NUE = 90%')
+
+        # plt.plot(n_in, min_productivity_output, 'k-.', label='Desired minimum productivity (N output > 80 kg/ha/yr)')
+
+        plt.fill_between(n_in, 0, n_output_50, color='red', alpha=0.3)
+        # label='NUE very low (NUE < 50%): Risk of inefficient N use')
+
+        plt.fill_between(n_in, n_output_90, l, color='orange', alpha=0.3)
+        # label='NUE very high (NUE > 90%): Risk of soil mning')
+        plt.xlabel('Nitrogen Input [kgN/ha]')
+        plt.ylabel('Nitrogen Output [kgN/ha]')
+        if get_return:
+            return plt
+    else:
+        ax.plot(n_in, max_surplus_line, 'k:')  # , label='N surplus = 40 kg/ha/yr')
+
+        ax.fill_between(n_in, n_output_50, max_surplus_line, color='yellow',
+                         alpha=0.5)  # , label='N surplus > 40 kg/ha/yr')
+
+        ax.plot(n_in, n_output_50, 'k--')  # , label='NUE = 50%')
+
+        ax.plot(n_in, n_output_90, 'k-')  # , label='NUE = 90%')
+
+        # plt.plot(n_in, min_productivity_output, 'k-.', label='Desired minimum productivity (N output > 80 kg/ha/yr)')
+
+        ax.fill_between(n_in, 0, n_output_50, color='red', alpha=0.3)
+        # label='NUE very low (NUE < 50%): Risk of inefficient N use')
+
+        ax.fill_between(n_in, n_output_90, l, color='orange', alpha=0.3)
+        # label='NUE very high (NUE > 90%): Risk of soil mning')
+        # plt.xlabel('Nitrogen Input [kgN/ha]')
+        # plt.ylabel('Nitrogen Output [kgN/ha]')
 
 
-def plot_fertilization_schedule(fertilization_policies, growth):
+
+def plot_years_within_metrics(nue_dict, all_models):
+    def subtract_list(a, b):
+
+        return [a_i - b_i for a_i, b_i in zip(a, b)]
+
+    fig, (ax_nue, ax_nsurp) = plt.subplots(2, 1, figsize=(10, 10))
+
+    if all_models:
+        ax_nue.bar(nue_dict['categories'], nue_dict['all_nue'], width=0.5, label='Efficient years', color='green')
+        ax_nue.bar(nue_dict['categories'],
+                   subtract_list([nue_dict['len_years']] * len(nue_dict['all_nue']), nue_dict['all_nue']),
+                   bottom=nue_dict['all_nue'], width=0.5,
+                   label='Inefficient years', color='orange')
+        ax_nue.set_ylabel('Number of years')
+        ax_nue.set_xlabel('Agent')
+        ax_nue.legend()
+
+        ax_nsurp.bar(nue_dict['categories'], nue_dict['all_n_surplus'], width=0.5,
+                     label='Years below 40 kg/ha N surplus',
+                     color='green')
+        ax_nsurp.bar(nue_dict['categories'],
+                     subtract_list([nue_dict['len_years']] * len(nue_dict['all_n_surplus']), nue_dict['all_n_surplus']),
+                     bottom=nue_dict['all_n_surplus'], width=0.5,
+                     label='Years above 40 kg/ha N surplus', color='orange')
+        ax_nsurp.set_ylabel('Number of years')
+        ax_nsurp.set_xlabel('Agent')
+        ax_nsurp.legend()
+    else:
+        ax_nue.bar(nue_dict['categories'], nue_dict['nue'], width=0.5, label='Efficient years', color='green')
+        ax_nue.bar(nue_dict['categories'], nue_dict['len_years'] - nue_dict['nue'], bottom=nue_dict['nue'], width=0.5,
+                   label='Inefficient years', color='orange')
+        ax_nue.set_ylabel('Number of years')
+        ax_nue.set_xlabel('Agent')
+        ax_nue.legend()
+
+        ax_nsurp.bar(nue_dict['categories'], nue_dict['n_surplus'], width=0.5, label='Years below 40 kg/ha N surplus',
+                     color='green')
+        ax_nsurp.bar(nue_dict['categories'], nue_dict['len_years'] - nue_dict['n_surplus'],
+                     bottom=nue_dict['n_surplus'], width=0.5,
+                     label='Years above 40 kg/ha N surplus', color='orange')
+        ax_nsurp.set_ylabel('Number of years')
+        ax_nsurp.set_xlabel('Agent')
+        ax_nsurp.legend()
+
+    ax_nue.set_title('Nitrogen Use Efficiency')
+    ax_nsurp.set_title('Nitrogen Surplus')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_fertilization_schedule(fertilization_policies, growth, NUE, Nsurplus, dvs, dict_good=None, year=2020):
     import matplotlib.dates as mdates
 
-    start_date = datetime.date(1989, 10, 3)
-    end_date = datetime.date(1990, 8, 20)
+    def filter_dict(dict_):
+        return {key: value for key, value in dict_.items() if
+                year in key[1] and key[0] in ['demeter', 'N2-PA', good_model, relative_model]}
+
+    def label_name(k, nue, nsurp, growth):
+        if 'LagPPO' in k[0]:
+            model_name = 'NUE Agent'
+        if 'demeter' in k[0]:
+            model_name = 'Demeter'
+        if 'N2-PA' in k[0]:
+            model_name = 'N2'
+        if 'def' in k[0]:
+            model_name = 'Relative-yield Agent'
+
+        # name = model_name + '; ' + 'NUE: ' + str(round(nue[k], 2)) + '; ' + 'N Surplus: ' + str(
+        #     round(nsurp[k], 1)) + '; ' + 'Yield: ' + str(round((growth[k][-1] / 1000), 1)) + ' Tons/ha'
+        name = model_name + '; ' + 'Cumulative applied N: ' + str(round(sum(fertilization_policies[(k[0], (year, (52.57, 5.63)))]), 1)) + 'kg/ha'
+
+        return name
+
+    colors = ['tomato', 'snow', 'darkslategray', 'peru']
+
+    start_date = datetime.date(year-1, 10, 3)
+    end_date = datetime.date(year, 8, 20)
 
     # Generate weekly date range
-    date_range = pd.date_range(start=start_date, end=end_date, freq='W-SUN')
+    date_range = pd.date_range(start=start_date, end=end_date, freq='W-SUN').date
 
-    fig, ax1 = plt.subplots(figsize=(12, 6))
+    fig, ax1 = plt.subplots(figsize=(9, 6))
+
+    good_model = 'LagPPO8'  # dict_good['good_model']
+    relative_model = 'def4'
+
+    fertilization_policies = filter_dict(fertilization_policies)
+    growth = filter_dict(growth)
+    NUE = filter_dict(NUE)
+    Nsurplus = filter_dict(Nsurplus)
+    dvs = filter_dict(dvs)
 
     offsets = np.linspace(-3, 3, len(fertilization_policies))
     for i, (agent, agent_v) in enumerate(fertilization_policies.items()):
         shifted_dates = date_range + pd.to_timedelta(offsets[i], unit='D')
-        ax1.bar(shifted_dates, agent_v, width=3, alpha=.9, label=agent[0])
+        ax1.bar(shifted_dates, agent_v, width=3, alpha=.9, label=label_name(agent, NUE, Nsurplus, growth),
+                color=colors[i], edgecolor='black')
     ax1.set_ylabel('Fertilizer applications [kg/ha]')
     ax1.yaxis.grid(True, which='major', linestyle='--')
 
     # Plot fertilization policy as vertical bars
     ax2 = ax1.twinx()
 
-    # Plot yield data
-    for agent, agent_v in growth.items():
-        if len(date_range) < len(agent_v):
-            agent_v.pop(0)
-        ax2.plot(date_range, agent_v, alpha=.9, label=agent[0])
-    ax2.set_xlabel('Date in growing year')
-    ax2.set_ylabel('Aggregated yield growth [kg/ha]')
-    ax2.yaxis.grid(False)
-    ax2.legend(loc='upper left')
+    dvs = dvs[('demeter', (year, (52.57, 5.63)))]
+    idx_dvs = next(i for i, value in enumerate(dvs) if value > 1)
+
+    # # # Plot yield data
+    # for agent, agent_v in dvs.items():
+    #     if len(date_range) < len(agent_v):
+    #         agent_v.pop(0)
+    #     ax2.plot(date_range, agent_v, alpha=.9)
+    # ax2.set_xlabel('Date in growing year')
+    # ax2.set_ylabel('Development Stage [-]')
+    # ax2.yaxis.grid(False)
+
+    with open(os.path.join(os.path.dirname(__file__), 'weather_utils', 'weather_csv', 'weather2020.csv'), 'r') as f:
+        weather_data = pd.read_csv(f)
+
+    weather_data['DAY'] = pd.to_datetime(weather_data['DAY'], format='%Y%m%d')
+    # weather_data['DAY'] = weather_data['DAY']
+
+    date_set = set(date_range)
+
+    # Filter using a lambda function to check membership in date_set
+    filtered_weather_data = weather_data[weather_data['DAY'].isin(date_set)]
+
+
+    ax2.plot(date_range, filtered_weather_data['RAIN'], color='tab:green')
+    ax2.set_ylabel('Precipitation (mm)')
+    ax2.set_xlabel('Day')
+
+    ax1.axvline(date_range[idx_dvs], color='black', linestyle='--', label='Flowering Date', linewidth=1.5)
+
+    ax1.legend(loc='upper left')
 
     # Set x-axis major ticks format
     ax1.xaxis.set_major_locator(mdates.MonthLocator())
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
 
+    ax1.set_ylim([0, 100])
+
+
+    # Set x-axis major ticks format
+    # ax2.xaxis.set_major_locator(mdates.MonthLocator())
+    # ax2.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
     # plt.grid(True)
+    # plt.title(f'Fertilization Policy in year {str(year)}')
     plt.tight_layout()
-    plt.legend(loc='lower right')
+    # plt.legend(loc='lower right')
     plt.show()
+
+
+def plot_nue_boxes(df, dict_good):
+    import matplotlib.patches as mpatches
+
+    def make_label_nue(agent, i):
+        return dict_good['categories'][i] + ' (' + str(dict_good[agent + '_nue_good']) + '/39)'
+
+    def make_label_nsurp(agent, i):
+        return dict_good['categories'][i] + ' (' + str(dict_good[agent + '_nsurplus_good']) + '/39)'
+
+    fig, (ax_nue, ax_nsurp) = plt.subplots(2, 1, figsize=(13, 13))
+    colors = ['darkslategray', 'peru', 'snow', 'tomato', 'mediumaquamarine', 'slateblue']
+    model_list = dict_good['categories']
+
+    custom_order = dict_good['good_model']
+    #
+    # index_sorter = {key: i for i, key in enumerate(custom_order)}
+    #
+    # df = df.sort_index(level='model', axis=0, key=lambda x: x.map(index_sorter))
+    df['models'] = pd.Categorical(df.index.get_level_values(0), categories=custom_order, ordered=True)
+
+    # df_filtered = df[df['model'].isin(model_list)]
+
+    ax_nue.axhline(y=0.5, lw=1, color='black')
+    ax_nue.axhline(y=0.9, lw=1, color='black')
+
+    ax_nsurp.axhline(y=0.0, lw=1, color='black')
+    ax_nsurp.axhline(y=40.0, lw=1, color='black')
+
+    box_nue = df.boxplot(ax=ax_nue, column='nue_value', by='models',
+                         grid=False, patch_artist=True, return_type='both',
+                         flierprops={'markeredgewidth': 2},)
+    box_nsurp = df.boxplot(ax=ax_nsurp, column='nsurplus_value', by='models',
+                           grid=False, patch_artist=True, return_type='both',
+                           flierprops={'markeredgewidth': 2},)
+
+    plt.suptitle('')
+    ax_nue.set_title('')
+    ax_nsurp.set_title('')
+
+    ax_nue.set_xticklabels(model_list, rotation=12, size=18)
+    ax_nsurp.set_xticklabels(model_list, rotation=12, size=18)
+
+    line_width = 2.2
+
+    for ax in box_nue['nue_value']:
+        if isinstance(ax, dict):
+            for i, box in enumerate(ax['boxes']):
+                box.set_facecolor(colors[i])
+                box.set_edgecolor('black')
+                box.set_linewidth(line_width)
+            for median in ax['medians']:
+                median.set_color('black')  # Set the color of the median to black
+                median.set_linewidth(line_width + 0.3)
+            for caps in ax['caps']:
+                caps.set_color('black')
+                caps.set_linewidth(line_width)
+            for whisk in ax['whiskers']:
+                whisk.set_color('black')
+                whisk.set_linewidth(line_width)
+            for flier in ax['fliers']:
+                flier.set_color('black')
+                flier.set_linewidth(line_width)
+
+    for ax in box_nsurp['nsurplus_value']:
+        if isinstance(ax, dict):
+            for i, box in enumerate(ax['boxes']):
+                box.set_facecolor(colors[i])
+                box.set_edgecolor('black')
+                box.set_linewidth(line_width)
+            for median in ax['medians']:
+                median.set_color('black')  # Set the color of the median to black
+                median.set_linewidth(line_width + 0.3)
+            for caps in ax['caps']:
+                caps.set_color('black')
+                caps.set_linewidth(line_width)
+            for whisk in ax['whiskers']:
+                whisk.set_color('black')
+                whisk.set_linewidth(line_width)
+            for flier in ax['fliers']:
+                flier.set_color('black')
+                flier.set_linewidth(line_width)
+
+    # set limits for fill
+    ax_nue.set_ylim([0.2, 1.3])
+    ax_nsurp.set_ylim([-100, 300])
+    # ax_nue.set_xlim([1982, 2022])
+    # ax_nsurp.set_xlim([1982, 2022])
+
+    color_fill = 'salmon'
+    ax_nue.fill_between(x=ax_nue.get_xlim(), y1=0.9, y2=ax_nue.get_ylim()[1], alpha=0.35, color=color_fill)
+    ax_nue.fill_between(x=ax_nue.get_xlim(), y1=0.5, y2=ax_nue.get_ylim()[0], alpha=0.35, color=color_fill)
+
+    ax_nsurp.fill_between(x=ax_nsurp.get_xlim(), y1=40, y2=ax_nsurp.get_ylim()[1], alpha=0.35, color=color_fill)
+    ax_nsurp.fill_between(x=ax_nsurp.get_xlim(), y1=0, y2=ax_nsurp.get_ylim()[0], alpha=0.35, color=color_fill)
+
+    legend_patches_nue = [mpatches.Patch(facecolor=color, edgecolor='black', label=make_label_nue(agent, i)) for
+                          i, (color, label, agent) in
+                          enumerate(zip(colors, model_list, dict_good['good_model']))]
+    legend_patches_nsurp = [mpatches.Patch(facecolor=color, edgecolor='black', label=make_label_nsurp(agent, i)) for
+                            i, (color, label, agent) in
+                            enumerate(zip(colors, model_list, dict_good['good_model']))]
+
+    # ax_nue.set_title('Nitrogen Use Efficiency of each year')
+    ax_nue.set_ylabel('Nitrogen Use Efficiency [-]', size=14)
+    ax_nue.set_xlabel('')
+    ax_nue.tick_params(axis='y', which='major', labelsize=14)
+    ax_nue.legend(handles=legend_patches_nue, loc='lower left', fontsize=8.5)
+    # ax_nsurp.set_title('Nitrogen Surplus of each year')
+    ax_nsurp.set_ylabel('Nitrogen Surplus [kg/ha]', size=14)
+    ax_nsurp.set_xlabel('')
+    ax_nsurp.tick_params(axis='y', which='major', labelsize=14)
+    ax_nsurp.legend(handles=legend_patches_nsurp, loc='upper left', fontsize=8.5)
+
+    ax_nue.set_ylim([0.3, 1.1])
+    ax_nsurp.set_ylim([-20, 150])
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_nue_scatter(df, dict_good):
+    # df.reset_index()
+
+    # def get_label(category):
+    #     if category in
+
+    add_lines = True
+    fig, (ax_nue, ax_nsurp) = plt.subplots(2, 1, figsize=(13, 13))
+
+    colors = ['darkslategray', 'peru', 'snow', 'tomato', 'mediumaquamarine', 'slateblue']
+    for i, agent in enumerate(dict_good['good_model']):
+        ax_nue.scatter(df.loc[agent, 'year'], df.loc[agent, 'nue_value'],
+                       label=dict_good['categories'][i] + ' (' + str(dict_good[agent + '_nue_good']) + '/39)',
+                       c=colors[i], edgecolors='black')
+        ax_nsurp.scatter(df.loc[agent, 'year'], df.loc[agent, 'nsurplus_value'],
+                         label=dict_good['categories'][i] + ' (' + str(dict_good[agent + '_nsurplus_good']) + '/39)',
+                         c=colors[i], edgecolors='black')
+
+        ax_nue.plot(df.loc[agent, 'year'], df.loc[agent, 'nue_value'], c=colors[i], lw=0.3)
+        ax_nsurp.plot(df.loc[agent, 'year'], df.loc[agent, 'nsurplus_value'], c=colors[i], lw=0.3)
+
+        ax_nue.set_xticks(df.loc[agent, 'year'])
+        ax_nsurp.set_xticks(df.loc[agent, 'year'])
+
+    year_ranges = range(1982, 2022)
+    year_ranges_more = range(1981, 2023)
+
+    color_fill = 'salmon'
+    ax_nue.fill_between(year_ranges_more, y1=0.9, y2=1.1, alpha=0.35, color=color_fill)
+    ax_nue.fill_between(year_ranges_more, y1=0.5, y2=0.3, alpha=0.35, color=color_fill)
+
+    ax_nsurp.fill_between(year_ranges_more, y1=40, y2=200, alpha=0.35, color=color_fill)
+    ax_nsurp.fill_between(year_ranges_more, y1=0, y2=-10, alpha=0.35, color=color_fill)
+
+    ax_nue.tick_params(axis='x', which='major', labelsize=9, rotation=45)
+    ax_nsurp.tick_params(axis='x', which='major', labelsize=9, rotation=45)
+
+    ax_nue.axhline(y=0.5, lw=1, color='black')
+    ax_nue.axhline(y=0.9, lw=1, color='black')
+
+    ax_nsurp.axhline(y=0.0, lw=1, color='black')
+    ax_nsurp.axhline(y=40.0, lw=1, color='black')
+
+    # ax_nue.set_title('Nitrogen Use Efficiency of each year')
+    ax_nue.set_ylabel('Nitrogen Use Efficiency [-]')
+    ax_nue.set_xlabel('Years')
+    ax_nue.legend()
+    # ax_nsurp.set_title('Nitrogen Surplus of each year')
+    ax_nsurp.set_ylabel('Nitrogen Surplus [kg/ha]')
+    ax_nsurp.set_xlabel('Years')
+    ax_nsurp.legend()
+
+    ax_nue.set_ylim([0.3, 1.1])
+    ax_nsurp.set_ylim([-10, 200])
+    ax_nue.set_xlim([1982, 2022])
+    ax_nsurp.set_xlim([1982, 2022])
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_nue_scatter1(df, dict_good):
+    # df.reset_index()
+
+    add_lines = True
+    fig, (ax_nue, ax_nsurp) = plt.subplots(2, 1, figsize=(10, 10))
+
+    colors = ['darkslategray', 'peru', 'lightseagreen']
+    for i, agent in enumerate([dict_good['good_model'], 'N2-PA', 'demeter']):
+        ax_nue.scatter(df.loc[agent, 'year'], df.loc[agent, 'nue_value'],
+                       label=dict_good['categories'][i] + ' (' + str(dict_good[agent + '_nue_good']) + '/39)',
+                       c=colors[i])
+        ax_nsurp.scatter(df.loc[agent, 'year'], df.loc[agent, 'nsurplus_value'],
+                         label=dict_good['categories'][i] + ' (' + str(dict_good[agent + '_nsurplus_good']) + '/39)',
+                         c=colors[i])
+
+        ax_nue.plot(df.loc[agent, 'year'], df.loc[agent, 'nue_value'], c=colors[i], lw=0.3)
+        ax_nsurp.plot(df.loc[agent, 'year'], df.loc[agent, 'nsurplus_value'], c=colors[i], lw=0.3)
+
+        ax_nue.set_xticks(df.loc[agent, 'year'])
+        ax_nsurp.set_xticks(df.loc[agent, 'year'])
+
+    year_ranges = range(1982, 2022)
+    year_ranges_more = range(1981, 2023)
+
+    color_fill = 'salmon'
+    ax_nue.fill_between(year_ranges_more, y1=0.9, y2=1.1, alpha=0.3, color=color_fill)
+    ax_nue.fill_between(year_ranges_more, y1=0.5, y2=0.3, alpha=0.3, color=color_fill)
+
+    ax_nsurp.fill_between(year_ranges_more, y1=40, y2=200, alpha=0.3, color=color_fill)
+    ax_nsurp.fill_between(year_ranges_more, y1=0, y2=-10, alpha=0.3, color=color_fill)
+
+    ax_nue.tick_params(axis='x', which='major', labelsize=9, rotation=45)
+    ax_nsurp.tick_params(axis='x', which='major', labelsize=9, rotation=45)
+
+    ax_nue.axhline(y=0.5, lw=1, color='black')
+    ax_nue.axhline(y=0.9, lw=1, color='black')
+
+    ax_nsurp.axhline(y=0.0, lw=1, color='black')
+    ax_nsurp.axhline(y=40.0, lw=1, color='black')
+
+    ax_nue.set_title('Nitrogen Use Efficiency of each year')
+    ax_nue.set_ylabel('Nitrogen Use Efficiency [-]', size=14)
+    ax_nue.set_xlabel('Years')
+    ax_nue.legend()
+    ax_nsurp.set_title('Nitrogen Surplus of each year')
+    ax_nsurp.set_ylabel('Nitrogen Surplus [kg/ha]', size=14)
+    ax_nsurp.set_xlabel('Years')
+    ax_nsurp.legend()
+
+    ax_nue.set_ylim([0.5, 1.1])
+    ax_nsurp.set_ylim([-10, 120])
+    ax_nue.set_xlim([1982, 2022])
+    ax_nsurp.set_xlim([1982, 2022])
+    plt.title('')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_heatmap_fertilization(df):
+    import matplotlib.dates as mdates
+
+    # start_date = datetime.date(1989, 10, 3)
+    # end_date = datetime.date(1990, 8, 20)
+    #
+    # # Generate weekly date range
+    # date_range = pd.date_range(start=start_date, end=end_date, freq='W-SUN')
+    #
+    # fig, ax1 = plt.subplots(figsize=(12, 6))
+    #
+    # offsets = np.linspace(-3, 3, len(fertilization_policies))
+    # for i, (agent, agent_v) in enumerate(fertilization_policies.items()):
+    #     shifted_dates = date_range + pd.to_timedelta(offsets[i], unit='D')
+    #     ax1.bar(shifted_dates, agent_v, width=3, alpha=.9, label=agent[0])
+    # ax1.set_ylabel('Fertilizer applications [kg/ha]')
+    # ax1.yaxis.grid(True, which='major', linestyle='--')
+    #
+    # # Plot fertilization policy as vertical bars
+    # ax2 = ax1.twinx()
+    #
+    # # Plot yield data
+    # for agent, agent_v in growth.items():
+    #     if len(date_range) < len(agent_v):
+    #         agent_v.pop(0)
+    #     ax2.plot(date_range, agent_v, alpha=.9, label=agent[0])
+    # ax2.set_xlabel('Date in growing year')
+    # ax2.set_ylabel('Aggregated yield growth [kg/ha]')
+    # ax2.yaxis.grid(False)
+    # ax2.legend(loc='upper left')
+    #
+    # # Set x-axis major ticks format
+    # ax1.xaxis.set_major_locator(mdates.MonthLocator())
+    # ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+    #
+    # # plt.grid(True)
+    # plt.tight_layout()
+    # plt.legend(loc='lower right')
+    # plt.show()
 
 
 def plot_3d_reward_function(env=False):
@@ -586,7 +1054,7 @@ def plot_3d_reward_function(env=False):
         for _ in range(weeks):
             _, _, term, _, info = env.step(0)
         else:
-            _, _, term, _, info = env.step(n_levels*3)
+            _, _, term, _, info = env.step(n_levels * 3)
 
         while not term:
             _, reward, term, _, info = env.step(0)
@@ -618,7 +1086,6 @@ def plot_3d_reward_function(env=False):
         c_values = np.linspace(0, 1, 100)
         B, C = np.meshgrid(b_values, c_values)
         Z = np.array([[cont.n_surplus_formula(b, c) for b in b_values] for c in c_values])
-
 
     # Create a 3D plot
     fig = plt.figure(figsize=(14, 10))

@@ -305,13 +305,8 @@ def train(log_dir, n_steps,
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
         ppo_policy = get_actor_critic_policy(masked_ac, agent)
-        if regl2 > 0 or regl1 > 0:
-            model = RegPPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
-                           tensorboard_log=log_dir, device=device, l2_coef=regl2, l1_coef=regl1)
-            print('Using Regularized PPO!')
-        else:
-            model = PPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
-                        tensorboard_log=log_dir, device=device)
+        model = PPO(ppo_policy, env_pcse_train, gamma=1, seed=seed, verbose=0, **hyperparams,
+                    tensorboard_log=log_dir, device=device)
     elif agent == 'DQN':
         env_pcse_train = wrapper_vectorized_env(env_pcse_train, flag_po,
                                                 multiproc=multiprocess, normalize=normalize, n_envs=n_envs)
@@ -367,7 +362,7 @@ def train(log_dir, n_steps,
             api_key = f.readline()
         comet_log = Experiment(
             api_key=api_key,
-            project_name="cropGym_nue_paper",
+            project_name="cropGym_nue_paper_experiments",
             workspace="pcse-gym",
             log_code=True,
             log_graph=True,
@@ -402,7 +397,7 @@ def train(log_dir, n_steps,
                                 **get_model_kwargs(pcse_model, train_locations,
                                                    start_type=kwargs.get('start_type', 'sowing')),
                                 **kwargs, seed=seed)
-    if action_limit or n_budget > 0:
+    if action_limit or n_budget > 0 or temporal_constraint:
         env_pcse_eval = ActionConstrainer(env_pcse_eval, action_limit=action_limit, n_budget=n_budget)
 
     env_pcse_eval = wrapper_vectorized_env(env_pcse_eval, flag_po,
@@ -412,7 +407,7 @@ def train(log_dir, n_steps,
         cost_measure = 'all'
     tb_log_name = f'{tag}-nsteps-{n_steps}-{agent}-{reward}'
     if use_comet:
-        comet_log.set_name(f'{tag}-{agent}-{reward}')
+        comet_log.set_name(f'{tag}-{agent}-{reward}-experiment')
         comet_log.add_tag(cost_measure)
     tb_log_name = tb_log_name + '-run'
 

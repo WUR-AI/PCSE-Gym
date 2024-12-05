@@ -252,9 +252,9 @@ def treatment_amounts(treatment: str):
         if 'N1' in treatment:
             amounts = [80, 0, 0]
         elif 'N2' in treatment:
-            amounts = [80, 60, 40]
+            amounts = [60, 80, 80]
         else:
-            amounts = [80, 120, 40]
+            amounts = [60, 140, 40]
     elif '-DB' in treatment:
         if 'N1' in treatment:
             amounts = [70, 0, 0]
