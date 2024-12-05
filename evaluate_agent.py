@@ -139,32 +139,32 @@ def get_demeter_policy(location, year, soil=None, init_n=None, constrained=True)
     if constrained:
         if soil is not None:
             if 'fast' in soil:
-                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_fast_soil',
+                with open(os.path.join(rootdir, "demeter_results", 'constrained_all_fast_soil',
                                        f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
-                    df_ceres = pd.read_csv(file, header=0)
-                return list(df_ceres[str(year)])
+                    df_demeter = pd.read_csv(file, header=0)
+                return list(df_demeter[str(year)])
             elif 'slo' in soil:
-                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_slow_soil',
+                with open(os.path.join(rootdir, "demeter_results", 'constrained_all_slow_soil',
                                        f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
-                    df_ceres = pd.read_csv(file, header=0)
-                return list(df_ceres[str(year)])
+                    df_demeter = pd.read_csv(file, header=0)
+                return list(df_demeter[str(year)])
         if init_n is not None:
             if 'low' in init_n:
-                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_low_n',
+                with open(os.path.join(rootdir, "demeter_results", 'constrained_all_low_n',
                                        f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
-                    df_ceres = pd.read_csv(file, header=0)
-                return list(df_ceres[str(year)])
+                    df_demeter = pd.read_csv(file, header=0)
+                return list(df_demeter[str(year)])
             elif 'high' in init_n:
-                with open(os.path.join(rootdir, "ceres_results", 'constrained_all_high_n',
+                with open(os.path.join(rootdir, "demeter_results", 'constrained_all_high_n',
                                        f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
-                    df_ceres = pd.read_csv(file, header=0)
-                return list(df_ceres[str(year)])
-        with open(os.path.join(rootdir, "ceres_results", 'constrained_all', f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
-            df_ceres = pd.read_csv(file, header=0)
-        return list(df_ceres[str(year)])
-    with open(os.path.join(rootdir, "ceres_results", f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
-        df_ceres = pd.read_csv(file, header=0)
-    return list(df_ceres[str(year)])
+                    df_demeter = pd.read_csv(file, header=0)
+                return list(df_demeter[str(year)])
+        with open(os.path.join(rootdir, "demeter_results", 'constrained_all', f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+            df_demeter = pd.read_csv(file, header=0)
+        return list(df_demeter[str(year)])
+    with open(os.path.join(rootdir, "demeter_results", f"{location[0]}-{location[1]}-{year}.csv"), "r") as file:
+        df_demeter = pd.read_csv(file, header=0)
+    return list(df_demeter[str(year)])
 
 
 def evaluate_demeter(env, n_eval_episodes=1, constrained=True, soil=None, init_n=None):
