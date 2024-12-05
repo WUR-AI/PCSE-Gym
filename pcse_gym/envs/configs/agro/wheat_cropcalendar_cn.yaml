@@ -1,0 +1,11 @@
+- 2006-10-01:
+    CropCalendar:
+        crop_name: wheat
+        variety_name: Winter_wheat_102
+        crop_start_date: 2006-10-01
+        crop_start_type: sowing
+        crop_end_date: 2007-08-10
+        crop_end_type: harvest
+        max_duration: 365
+    TimedEvents: null
+    StateEvents: null

@@ -6,7 +6,7 @@ jobs:
       strategy:
         matrix:
           os: [ubuntu-latest]
-          python-version: ['3.10']
+          python-version: ['3.9']
       steps:
       - uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
@@ -17,10 +17,10 @@ jobs:
           pip install flake8 pytest pytest-cov
           pip uninstall -y --quiet pcse
           git clone https://github.com/ajwdewit/pcse.git /tmp/pcse
-          cd /tmp/pcse && git switch develop_WOFOST_v8_1 && git apply --ignore-space-change --ignore-whitespace ${GITHUB_WORKSPACE}/notebooks/nitrogen-winterwheat/pcse-lintul3.patch && pip install --quiet -e . && cd ${GITHUB_WORKSPACE}
-          git clone https://github.com/hbja/popgym.git /tmp/popgym && cd /tmp/popgym && pip install ".[baselines]" && cd ${GITHUB_WORKSPACE}
-          pip install stable_baselines3==2.0.0a9 sb3-contrib==2.0.0a9
-          pip install gymnasium==0.28.1 lib_programname tensorboard scipy tqdm pandas numpy
+          cd /tmp/pcse && pip install --quiet -e . && cd ${GITHUB_WORKSPACE}
+          pip install dotmap
+          pip install stable_baselines3 sb3-contrib
+          pip install gymnasium==0.28.1 lib_programname tensorboard scipy tqdm pandas numpy==1.26.4 seaborn
       - name: Lint with flake8
         run: |
           # stop the build if there are Python syntax errors or undefined names

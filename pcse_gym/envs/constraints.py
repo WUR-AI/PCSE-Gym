@@ -13,11 +13,12 @@ class ActionConstrainer(ActionWrapper):
     """
     Action Wrapper to limit fertilization actions
     """
-    def __init__(self, env, action_limit=0, n_budget=0):
+    def __init__(self, env, action_limit=0, n_budget=0, temporal=False):
         super(ActionConstrainer, self).__init__(env)
         self.counter = 0
         self.action_limit = action_limit
         self.n_counter = 0
+        self.temporal = temporal
         self.n_budget = n_budget
 
     def action(self, action):
@@ -31,6 +32,29 @@ class ActionConstrainer(ActionWrapper):
                 action = self.discrete_n_budget(action)
             elif isinstance(self.action_space, gym.spaces.MultiDiscrete):
                 action = self.multi_discrete_n_budget(action)
+        if self.temporal is not False:
+            if isinstance(self.action_space, gym.spaces.Discrete):
+                action = self.discrete_temporal_constraint(action)
+            if isinstance(self.action_space, gym.spaces.MultiDiscrete):
+                action = self.multi_discrete_temporal_constraint(action)
+        return action
+
+    def discrete_temporal_constraint(self, action):
+        if self.sb3_env.dvs < 0.01:
+            action = 0
+            return action
+        if self.sb3_env.dvs > 1:
+            action = 0
+            return action
+        return action
+
+    def multi_discrete_temporal_constraint(self, action):
+        if self.sb3_env.dvs < 0.01:
+            action[0] = 0
+            return action
+        if self.sb3_env.dvs > 1:
+            action[0] = 0
+            return action
         return action
 
     def discrete_n_budget(self, action):

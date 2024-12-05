@@ -14,10 +14,10 @@ def get_var_names(pcse_output):
 
 
 def get_name_storage_organ(var_names):
+    # if 'TWSO' in var_names:
+    #     return 'TWSO'
     if 'WSO' in var_names:
         return 'WSO'
-    elif 'TWSO' in var_names:
-        return 'TWSO'
     raise Exception(" (T)WSO not found")
 
 
@@ -42,6 +42,14 @@ def get_conversion_factor(var, dict_lintul_wofost=get_dict_lintul_wofost()):
     raise Exception(f'{var} not found')
 
 
+def get_n_storage_organ(pcse_output):
+    return pcse_output[-1]['NamountSO']
+
+
+def get_year_in_step(pcse_output):
+    return pcse_output[-1]['day'].year
+
+
 def compute_growth_var(pcse_output, timestep, var):
     var_start = pcse_output[get_previous_index(pcse_output, timestep)][var]
     var_finish = pcse_output[-1][var]
@@ -51,12 +59,11 @@ def compute_growth_var(pcse_output, timestep, var):
     return growth
 
 
-def compute_growth_storage_organ(pcse_output, timestep):
+def compute_growth_storage_organ(pcse_output, timestep, multiplier_amount=1):
     """
-    Computes growth of storage organ in g/m2
+    Computes growth of storage organ in kg/ha if in WOFOST; g/m2 if in LINTUL
     """
-    wso_var = get_name_storage_organ(get_var_names(pcse_output))
+    wso_var = "WSO"  # get_name_storage_organ(get_var_names(pcse_output))
     wso_growth = compute_growth_var(pcse_output, timestep, wso_var)
-    if needs_conversion(wso_var):
-        wso_growth = wso_growth * get_conversion_factor(wso_var)
+    wso_growth = wso_growth / multiplier_amount
     return wso_growth

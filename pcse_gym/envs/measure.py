@@ -43,11 +43,10 @@ class MeasureOrNot:
         measuring_cost = np.zeros(len(measurement))
 
         # check flag for either selective measuring or non-selective measuring
-        match self.measure_all:
-            case False:  # for selective measuring
-                obs, measuring_cost = self.selective_measure(measurement, measuring_cost, obs)
-            case True:  # for non-selective measuring
-                obs, measuring_cost = self.non_selective_measure(measurement, measuring_cost, obs)
+        if self.measure_all is False:  # for selective measuring
+            obs, measuring_cost = self.selective_measure(measurement, measuring_cost, obs)
+        else:  # for non-selective measuring
+            obs, measuring_cost = self.non_selective_measure(measurement, measuring_cost, obs)
 
         if self.mask:
             obs = self.extend_observation(obs)
@@ -88,19 +87,18 @@ class MeasureOrNot:
 
     def get_noise(self, obs, index):
         feature = self.get_match(index)
-        match feature:
-            case 'LAI':
-                obs = self.rng.normal(obs, 0.4)
-            case 'SM':
-                obs = self.rng.normal(obs, 0.2)
-            case 'NAVAIL':
-                obs = self.rng.normal(obs, 5)
-            case 'NuptakeTotal':
-                obs = self.rng.normal(obs, 5)
-            case 'TAGP':
-                obs = self.rng.normal(obs, 2)
-            case _:
-                obs = self.rng.normal(obs, 1)
+        if feature == 'LAI':
+            obs = self.rng.normal(obs, 0.4)
+        elif feature == 'SM':
+            obs = self.rng.normal(obs, 0.2)
+        elif feature == 'NAVAIL':
+            obs = self.rng.normal(obs, 5)
+        elif feature == 'NuptakeTotal':
+            obs = self.rng.normal(obs, 5)
+        elif feature == 'TAGP':
+            obs = self.rng.normal(obs, 2)
+        else:
+            obs = self.rng.normal(obs, 1)
         return obs
 
     def get_all_obs_cost(self, price, measurement_cost):
@@ -117,13 +115,12 @@ class MeasureOrNot:
         return value_cost * self.cost_multiplier
 
     def list_of_costs(self, cost):
-        match cost:
-            case 1:
-                return self.get_cost_function_coef()
-            case 2:
-                return self.cheap_costs()
-            case _:
-                return Exception("Not a valid choice")
+        if cost == 1:
+            return self.get_cost_function_coef()
+        elif cost == 2:
+            return self.cheap_costs()
+        else:
+            return Exception("Not a valid choice")
 
     def get_match(self, reference):
         key_match = None

@@ -1,6 +1,7 @@
 import datetime
 import os
 import copy
+import functools
 
 import numpy as np
 import yaml
@@ -19,49 +20,108 @@ import pcse
 """
 
 
-# TODO replace the usage of the function replace_years() with this. If we do, a lot of refactoring needed.
-def generate_agro_management(years: list, start_type='emergence', ) -> list:
-    """
-    Function to generate a dictionary, mimicking the wheat_cropcalendar.yaml file
+class AgroManagementContainer:
+    def __init__(self, agro_management: list):
+        self.agro_structure = agro_management
+        self.campaign_date: datetime.date = list(agro_management[0].keys())[0]
+        self.crop_name: str = agro_management[0][self.campaign_date]['CropCalendar']['crop_name']
+        self.crop_variety: str = agro_management[0][self.campaign_date]['CropCalendar']['variety_name']
+        self.crop_start_date: datetime.date = agro_management[0][self.campaign_date]['CropCalendar']['crop_start_date']
+        self.crop_start_type: str = agro_management[0][self.campaign_date]['CropCalendar']['crop_start_type']
+        self.crop_end_date: datetime.date = agro_management[0][self.campaign_date]['CropCalendar']['crop_end_date']
+        self.crop_end_type: str = agro_management[0][self.campaign_date]['CropCalendar']['crop_end_type']
+        self.max_duration: int = agro_management[0][self.campaign_date]['CropCalendar']['max_duration']
 
-    :param years: a list of years, preferably a set() of test and train years
-    :param start_type: the crop state when starting the simulation.
-           Either 'sowing' or 'emergence'. It is 'emergence' by default.
-    :return: a list of dicts of the PCSE campaign schedule
-    """
-    assert start_type == 'emergence' or start_type == 'sowing', "start_type has to be either 'emergence' or 'sowing'"
+        self.structure = None
+        self.build_structure()
 
-    # Base structure of wheat_cropcalendar.yaml
-    base_structure = {
-        'CropCalendar': {
-            'crop_name': 'wheat',
-            'variety_name': 'winter wheat',
-            'crop_start_type': start_type,
-            'crop_end_type': 'earliest',
-            'max_duration': 365
-        },
-        'StateEvents': None,
-        'TimedEvents': None  # can be modified if we add fixed fertilization events
-    }
+    def build_structure(self):
+        self.structure = yaml.load(f'''
+                    - {self.campaign_date}:
+                        CropCalendar:
+                            crop_name: {self.crop_name}
+                            variety_name: {self.crop_variety}
+                            crop_start_date: {self.crop_start_date}
+                            crop_start_type: {self.crop_start_type}
+                            crop_end_date: {self.crop_end_date}
+                            crop_end_type: {self.crop_end_type}
+                            max_duration: {self.max_duration}
+                        TimedEvents: null
+                        StateEvents: null
+                ''', Loader=yaml.SafeLoader)
 
-    # Generate structure for each year
-    agro_management = []
-    for year in years:
-        year_structure = copy.deepcopy(base_structure)  # use deepcopy to ensure propagation
-        # Correctly setting the dates for each year
-        if start_type == 'emergence':
-            year_structure['CropCalendar']['crop_start_date'] = f"{year}-01-01"
-        elif start_type == 'sowing':
-            year_structure['CropCalendar']['crop_start_date'] = f"{year - 1}-10-01"
-        year_structure['CropCalendar']['crop_end_date'] = f"{year}-09-01"
-        if start_type == 'emergence':
-            agro_management.append({f"{year}-01-01": year_structure})
-        elif start_type == 'sowing':
-            agro_management.append({f"{year - 1}-10-01": year_structure})  # year - 1 to match sowing date
-    return agro_management
+    def replace_years(self, y):
+        """
+            Years replaced are the harvest date. Campaign start and sow date starts a year before.
+        """
+        if isinstance(y, list):
+            y = y[0]
+        if self.campaign_date.year == self.crop_end_date.year:
+            yprev = y
+        else:
+            yprev = y - 1
+        self.campaign_date = self.campaign_date.replace(year=yprev)
+        self.crop_start_date = self.crop_start_date.replace(year=yprev)
+        self.crop_end_date = self.crop_end_date.replace(year=y)
+
+        self.build_structure()
+        return self.structure
+
+    def replace_sow_date(self, year, month, day):
+        self.crop_start_date = self.crop_start_date.replace(year=year, month=month, day=day)
+
+        self.build_structure()
+        return self.structure
+
+    def replace_harvest_date(self, year, month, day):
+        self.crop_end_date = self.crop_end_date.replace(year=year, month=month, day=day)
+
+        self.build_structure()
+        return self.structure
+
+    def replace_start_type(self, start):
+        assert start == 'sowing' or start == 'emergence'
+        self.crop_start_type = start
+
+        self.build_structure()
+        return self.structure
+
+    def replace_variety_name(self, name='Arminda'):
+        self.crop_variety = name
+
+        self.build_structure()
+        return self.structure
+
+    def start_sowing(self):
+        if self.campaign_date.year == self.crop_end_date.year:
+            self.campaign_date = datetime.date(self.crop_end_date.year - 1, 10, 1)
+            self.crop_start_date = datetime.date(self.crop_end_date.year - 1, 10, 1)
+
+        self.build_structure()
+
+    def start_emergence(self):
+        self.campaign_date = datetime.date(self.crop_end_date.year, 1, 1)
+        self.crop_start_date = datetime.date(self.crop_end_date.year, 1, 1)
+
+        self.build_structure()
+
+    def get_start_type(self, start_type):
+        self.start_emergence() if start_type == 'emergence' else self.start_sowing()
+
+    @property
+    def get_structure(self):
+        return self.structure
+
+    @property
+    def get_start_date(self):
+        return self.crop_start_date
+
+    @property
+    def get_end_date(self):
+        return self.crop_end_date
 
 
-def replace_years(agro_management, years):
+def replace_years_(agro_management, years):  # deprecated
     if not isinstance(years, list):
         years = [years]
 
@@ -99,19 +159,107 @@ def replace_years(agro_management, years):
     return updated_agro_management
 
 
-def get_weather_data_provider(location) -> pcse.db.NASAPowerWeatherDataProvider:
-    wdp = pcse.db.NASAPowerWeatherDataProvider(*location)
+def get_weather_data_provider(location,
+                              random_weather=False) -> pcse.input.NASAPowerWeatherDataProvider or pcse.fileinput.CSVWeatherDataProvider:
+    if random_weather:
+        wdp = get_random_weather_provider(location)
+    else:
+        if location[0] % 0.5 != 0 or location[1] % 0.5 != 0:
+            base_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+            weather_file_dir = os.path.join(base_dir, 'utils', 'weather_utils', 'weather_csv')
+            wdp = get_excel_provider(weather_file_dir, location)
+        else:
+            wdp = get_nasapower_provider(location)
+    return wdp
+
+
+@functools.cache
+def get_excel_provider(file_dir: str, location):
+    return pcse.input.ExcelWeatherDataProvider(os.path.join(file_dir, f'{location[0]}-{location[1]}.xlsx'))
+
+
+@functools.cache
+def get_nasapower_provider(location):
+    return pcse.input.NASAPowerWeatherDataProvider(*location)
+
+
+@functools.cache
+def get_random_weather_provider(location) -> pcse.input.CSVWeatherDataProvider:
+    path_to_file = os.path.dirname(os.path.realpath(__file__))
+    lat, lon = location
+    if '.' not in str(lat):
+        lat = str(lat) + '.0'
+    if '.' not in str(lon):
+        lon = str(lon) + '.0'
+    csv_name = f'{lat}-{lon}_random_weather.csv'
+    filename = os.path.join(path_to_file[:-4], 'utils', 'weather_utils', 'random_weather_csv', csv_name)
+    wdp = pcse.input.CSVWeatherDataProvider(filename)
     return wdp
 
 
 class Engine(pcse.engine.Engine):
     """
-    Wraps around the PCSE engine/crop model to set a flag when the simulation has terminated
+    Wraps around the PCSE engine/crop model for correct rate updates after fertilization action and
+    to set a flag when the simulation has terminated
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._flag_terminated = False
+
+    def _run(self, action):
+        """Make one time step of the simulation.
+        """
+
+        # Update timer
+        self.day, delt = self.timer()
+
+        # State integration
+        self.integrate(self.day, delt)
+
+        # Driving variables
+        self.drv = self._get_driving_variables(self.day)
+
+        # Agromanagement decisions
+        self.agromanager(self.day, self.drv)
+
+        # Do actions
+        if action > 0:
+            self._send_signal(signal=pcse.signals.apply_n_snomin,
+                              amount=action,
+                              application_depth=10.,
+                              cnratio=0.,
+                              f_orgmat=0.,
+                              f_NH4N=0.5,
+                              f_NO3N=0.5,
+                              initial_age=0,
+                              )
+            self._send_signal(signal=pcse.signals.apply_n,
+                              amount=action,
+                              recovery=0.7,
+                              N_amount=action,
+                              N_recovery=0.7
+                              )
+
+        # Rate calculation
+        self.calc_rates(self.day, self.drv)
+
+        if self.flag_terminate is True:
+            self._terminate_simulation(self.day)
+
+    def run(self, days=1, action=0):
+        """Advances the system state with given number of days"""
+
+        # do action at end of time step
+        days_counter = days
+        days_done = 0
+        while (days_done < days) and (self.flag_terminate is False):
+            days_done += 1
+            days_counter -= 1
+            if days_counter > 0:
+                self._run(0)
+            else:
+                self._run(action)
 
     @property
     def terminated(self):
@@ -181,15 +329,15 @@ class PCSEEnv(gym.Env):
 
         # If any parameter files are specified as path, convert them to a suitable object for pcse
         if isinstance(crop_parameters, str):
-            crop_parameters = pcse.fileinput.PCSEFileReader(crop_parameters)
+            crop_parameters = pcse.input.PCSEFileReader(crop_parameters)
         if isinstance(site_parameters, str):
-            site_parameters = pcse.fileinput.PCSEFileReader(site_parameters)
+            site_parameters = pcse.input.PCSEFileReader(site_parameters)
         if isinstance(soil_parameters, str):
-            soil_parameters = pcse.fileinput.PCSEFileReader(soil_parameters)
+            soil_parameters = pcse.input.PCSEFileReader(soil_parameters)
 
         # Set location
         if location is None:
-            location = (52, 5.5)
+            location = (52.0, 5.5)
         self._location = location
         self._timestep = timestep
 
@@ -206,24 +354,31 @@ class PCSEEnv(gym.Env):
         with open(agro_config, 'r') as f:
             self._agro_management = yaml.load(f, Loader=yaml.SafeLoader)
 
+        # Initialize Agromanagement Container Class
+        self.agmt = AgroManagementContainer(self._agro_management)
+
+        self.agmt.get_start_type(kwargs.get('start_type'))
+
         if years is not None:
-            self._agro_management = replace_years(self._agro_management, years)
+            self._agro_management = self.agmt.replace_years(years)
 
         # Store the PCSE Engine config
         self._model_config = model_config
 
         # Get the weather data source
-        self._weather_data_provider = get_weather_data_provider(self._location)
+        self._weather_data_provider = get_weather_data_provider(self._location, kwargs.get('random_weather'))
 
         # Create a PCSE engine / crop growth model
         self._model = self._init_pcse_model()
 
         # Use the config files to extract relevant settings
-        model_config = pcse.util.ConfigurationLoader(model_config)
+        model_config = pcse.base.ConfigurationLoader(model_config)
         self._output_variables = model_config.OUTPUT_VARS  # variables given by the PCSE model output
         self._summary_variables = model_config.SUMMARY_OUTPUT_VARS  # Summary variables are given at the end of a run
         self._weather_variables = list(pcse.base.weather.WeatherDataContainer.required)
 
+        # Define action features for observation
+        self.action_feature = self._get_action_features_space()
         # Define Gym observation space
         self.observation_space = self._get_observation_space()
         # Define Gym action space
@@ -233,7 +388,12 @@ class PCSEEnv(gym.Env):
 
         # Inject different initial condition every episode if it specified in args
         if options is not None:
-            self._site_params = options
+            if 'NH4I' in options:
+                self._site_params['NH4I'] = options['NH4I']
+                self._site_params['NO3I'] = options['NO3I']
+            if 'NH4ConcR' in options:
+                self._site_params['NH4ConcR'] = options['NH4ConcR']
+                self._site_params['NO3ConcR'] = options['NO3ConcR']
 
         # Combine the config files in a single PCSE ParameterProvider object
         self._parameter_provider = pcse.base.ParameterProvider(cropdata=self._crop_params,
@@ -257,6 +417,7 @@ class PCSEEnv(gym.Env):
         space = gym.spaces.Dict({
             'crop_model': self._get_observation_space_crop_model(),
             'weather': self._get_observation_space_weather(),
+            'actions': self._get_action_features_space(),
         })
         return space
 
@@ -272,6 +433,13 @@ class PCSEEnv(gym.Env):
                 'ES0': gym.spaces.Box(0, np.inf, (self._timestep,)),
                 'ET0': gym.spaces.Box(0, np.inf, (self._timestep,)),
                 'WIND': gym.spaces.Box(0, np.inf, (self._timestep,)),
+            }
+        )
+
+    def _get_action_features_space(self) -> gym.spaces.Space:
+        return gym.spaces.Dict(
+            {
+                'action_history': gym.spaces.Box(0, np.inf, (self._timestep,)),
             }
         )
 
@@ -362,10 +530,10 @@ class PCSEEnv(gym.Env):
         # Apply action
         if isinstance(action, np.ndarray):
             action = action[0]
-        self._apply_action(action)
+        action = self._apply_action(action)  # is subclassed by sb3
 
         # Run the crop growth model
-        self._model.run(days=self._timestep)
+        self._model.run(days=self._timestep, action=action)
         # Get the model output
         output = self._model.get_output()[-self._timestep:]
         info['days'] = [day['day'] for day in output]
@@ -425,10 +593,16 @@ class PCSEEnv(gym.Env):
         # Cast the weather data into a dict
         weather_observation = {var: [getattr(weather_data[d], var) for d in range(len(days))] for var in
                                self._weather_variables}
+        # Get action history through action features
+        if 'SNOMIN' in self._model_config:
+            action_features = {'action_history': [day['RNH4AMTT'] / 1e-3 + day["RNO3AMTT"] / 1e-3 for day in output]}
+        else:
+            action_features = {}
 
         o = {
             'crop_model': crop_model_observation,
             'weather': weather_observation,
+            'action_features': action_features,
         }
 
         return o

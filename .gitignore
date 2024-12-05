@@ -2,3 +2,4 @@
 _notebooks_old/nitrogen-winterwheat/tensorboard_logs
 _notebooks_old/nitrogen-winterwheat/.ipynb_checkpoints
 .pyc
+/comet/

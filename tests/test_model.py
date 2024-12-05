@@ -11,8 +11,9 @@ import pcse_gym.utils.defaults as defaults
 # TODO: figure out a more robust way of obtaining the file paths
 class TestModel(unittest.TestCase):
     def test_model(self):
-        model_path = os.path.abspath('tests/model-1')
-        stats_path = os.path.abspath('tests/model-1.pkl')
+        file_path = os.path.dirname(os.path.realpath(__file__))
+        model_path = os.path.join(file_path, 'model-1')
+        stats_path = os.path.join(file_path, 'model-1.pkl')
         custom_objects = {"lr_schedule": lambda x: 0.0002, "clip_range": lambda x: 0.3}
         custom_objects["action_space"] = gym.spaces.Discrete(3)
         model_cropgym = PPO.load(model_path, custom_objects=custom_objects, device='cuda', print_system_info=True)
@@ -29,7 +30,7 @@ class TestModel(unittest.TestCase):
                 results_key = (test_year, location)
                 rewards_model[results_key], results_model[results_key] = evaluate_policy(model_cropgym, env, amount=1)
         summary = summarize_results(results_model)
-        self.assertAlmostEqual(summary.loc[[(1992, (48, 0))]]['WSO'].values[0], 357.7, 0)
-        self.assertAlmostEqual(summary.loc[[(1992, (48, 0))]]['reward'].values[0], -74.8, 0)
-        self.assertAlmostEqual(summary.loc[[(2002, (52, 5.5))]]['WSO'].values[0], 880.5, 0)
-        self.assertAlmostEqual(summary.loc[[(2002, (52, 5.5))]]['reward'].values[0], 133.0, 0)
+        self.assertAlmostEqual(summary.loc[[(1992, (48, 0))]]['WSO'].values[0], 275.4, 0)
+        self.assertAlmostEqual(summary.loc[[(1992, (48, 0))]]['reward'].values[0], 177.2, 0)
+        self.assertAlmostEqual(summary.loc[[(2002, (52, 5.5))]]['WSO'].values[0], 824.3, 0)
+        self.assertAlmostEqual(summary.loc[[(2002, (52, 5.5))]]['reward'].values[0], 571.3, 0)

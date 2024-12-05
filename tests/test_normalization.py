@@ -92,7 +92,7 @@ class MeasureNormalizations(unittest.TestCase):
         #         expected[i] = obs[i]
         #         expected[j] = 1
 
-        self.assertListAlmostEqual([-1.05,
+        self.assertListAlmostEqual([-1.23,
                               -0.78,
                               0.0,
                               -0.85,

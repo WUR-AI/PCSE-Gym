@@ -5,7 +5,7 @@ from collections import defaultdict
 import lib_programname
 import numpy as np
 
-from pcse.db.nasapower import NASAPowerWeatherDataProvider
+from pcse.input.nasapower import NASAPowerWeatherDataProvider
 import matplotlib.pyplot as plt
 
 NL_loc_ext = [(52, 5.5), (51.5, 5), (52.5, 6.0)]
