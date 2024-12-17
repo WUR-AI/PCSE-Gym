@@ -13,7 +13,7 @@ import pcse
     Gym:  https://github.com/Farama-Foundation/Gymnasium
     PCSE: https://github.com/ajwdewit/pcse
     
-    Based on the PCSE-Gym environment built by Hiske Overweg (https://github.com/BigDataWUR/crop-gym)
+    Based on the PCSE-Gym environment built by Hiske Overweg (https://github.com/WUR-AI/crop-gym)
     
 """
 
