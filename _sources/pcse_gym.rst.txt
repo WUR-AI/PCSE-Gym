@@ -1,0 +1,19 @@
+pcse\_gym package
+=================
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   pcse_gym.envs
+   pcse_gym.utils
+
+Module contents
+---------------
+
+.. automodule:: pcse_gym
+   :members:
+   :undoc-members:
+   :show-inheritance:
