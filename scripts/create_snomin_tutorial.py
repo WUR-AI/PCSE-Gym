@@ -286,7 +286,8 @@ cells = [
     ),
     md("## 5. Compare baseline policies\n\n"
        "Standard practice applies **60 kg N/ha** at each of three split dates "
-       "(late Feb, late Mar, late Apr) — ~180 kg N/ha total."),
+       "(late Feb, late Mar, late Apr of the **harvest year** — e.g. for crop year 2000, "
+       "applications fall in Feb–Apr 2000 while sowing was autumn 1999)."),
     code(
         "from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize\n"
         "from pcse_gym.utils.eval import evaluate_policy, to_scalar\n"

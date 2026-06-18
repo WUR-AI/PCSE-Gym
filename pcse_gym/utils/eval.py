@@ -273,6 +273,20 @@ def _standard_practice_action(env, amount=1):
     return [amount * 3]
 
 
+def _standard_practice_fert_dates(env):
+    """Spring split N dates (Feb–Apr) in the harvest year of a winter-cereal campaign."""
+    try:
+        sb3_env = env.get_attr("sb3_env")[0]
+        application_year = sb3_env.agmt.crop_end_date.year
+    except (AttributeError, IndexError, TypeError):
+        application_year = env.get_attr("date")[0].year
+    return [
+        datetime.date(application_year, 2, 24),
+        datetime.date(application_year, 3, 26),
+        datetime.date(application_year, 4, 29),
+    ]
+
+
 def evaluate_policy(
         policy,
         env: Union[gym.Env, VecEnv],
@@ -313,9 +327,6 @@ def evaluate_policy(
     if isinstance(policy, base_class.BaseAlgorithm):
         assert (policy.action_space == action_space)
 
-    if isinstance(action_space, gym.spaces.Discrete) and not isinstance(policy, base_class.BaseAlgorithm):
-        print('Warning!')
-
     episode_rewards, episode_infos = [], []
     for i in range(n_eval_episodes):
         if isinstance(policy, base_class.BaseAlgorithm):
@@ -325,8 +336,7 @@ def evaluate_policy(
         terminated, truncated, state, lstm_state = False, False, None, None
         episode_reward = 0.0
         episode_length = 0
-        year = env.get_attr("date")[0].year
-        fert_dates = [datetime.date(year, 2, 24), datetime.date(year, 3, 26), datetime.date(year, 4, 29)]
+        fert_dates = _standard_practice_fert_dates(env)
         action = [amount * 0]
         infos_this_episode = []
         prob, val = None, None
@@ -375,7 +385,7 @@ def evaluate_policy(
             if policy in ['standard-practice', 'standard-practise']:
                 date = env.get_attr("date")[0]
                 for fert_date in fert_dates:
-                    if date > fert_date and date <= fert_date + datetime.timedelta(7):
+                    if fert_date <= date < fert_date + datetime.timedelta(days=7):
                         action = _standard_practice_action(env, amount)
             if policy == 'no-nitrogen':
                 action = [0]
