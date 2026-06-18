@@ -374,6 +374,7 @@ cells = [
         "        test_locations=test_locations,\n"
         "        eval_freq=nsteps,\n"
         "        pcse_model=PCSE_MODEL,\n"
+        "        log_figures=False,  # skip TB figure plots in Colab (winter wheat spans day-of-year >335)\n"
         "    ),\n"
         "    tb_log_name='SNOMIN-PPO-demo',\n"
         ")"

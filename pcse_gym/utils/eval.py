@@ -1,5 +1,9 @@
 import os
 import datetime
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="jupyter_client")
+
 import pandas as pd
 import gymnasium as gym
 import numpy as np
@@ -193,8 +197,12 @@ def plot_variable(results_dict, variable='reward', cumulative_variables=get_cumu
     ax.tick_params(axis='x', which='minor', grid_alpha=0.7, colors=ax.get_figure().get_facecolor(), grid_ls=":")
 
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
-    month_days = [0, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
-    extra_month = next(x[0] for x in enumerate(month_days) if x[1] >= xmax)
+    month_days = [0, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366]
+    months = months + ['']
+    extra_month = next(
+        (i for i, md in enumerate(month_days) if md >= xmax),
+        len(month_days) - 1,
+    )
     month_days = month_days[0:extra_month + 1]
     months = months[0:extra_month + 1]
     ax.set_xticks(month_days)
@@ -485,6 +493,7 @@ class EvalCallback(BaseCallback):
         self.seed = seed
         self.env_eval = env_eval
         self.po_features = kwargs.get('po_features')
+        self.log_figures = kwargs.get('log_figures', True)
 
         def def_value(): return 0
 
@@ -644,24 +653,25 @@ class EvalCallback(BaseCallback):
 
             variables = get_eval_log_variables(self.pcse_model, self.po_features)
 
-            keys_figure = [(a, b) for a in self.test_years for b in self.test_locations]
-            results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
+            if self.log_figures:
+                keys_figure = [(a, b) for a in self.test_years for b in self.test_locations]
+                results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
 
-            for i, variable in enumerate(variables):
-                if variable not in results_figure[list(results_figure.keys())[0]][0].keys():
-                    continue
-                plot_individual = False
-                if plot_individual:
+                for i, variable in enumerate(variables):
+                    if variable not in results_figure[list(results_figure.keys())[0]][0].keys():
+                        continue
+                    plot_individual = False
+                    if plot_individual:
+                        fig, ax = plt.subplots()
+                        plot_variable(results_figure, variable=variable, ax=ax, ylim=get_ylim_dict()[variable])
+                        self.logger.record(f'figures/{variable}', Figure(fig, close=True))
+                        plt.close()
+
                     fig, ax = plt.subplots()
-                    plot_variable(results_figure, variable=variable, ax=ax, ylim=get_ylim_dict()[variable])
-                    self.logger.record(f'figures/{variable}', Figure(fig, close=True))
+                    plot_variable(results_figure, variable=variable, ax=ax, ylim=get_ylim_dict()[variable],
+                                  plot_average=True)
+                    self.logger.record(f'figures/avg-{variable}', Figure(fig, close=True))
                     plt.close()
-
-                fig, ax = plt.subplots()
-                plot_variable(results_figure, variable=variable, ax=ax, ylim=get_ylim_dict()[variable],
-                              plot_average=True)
-                self.logger.record(f'figures/avg-{variable}', Figure(fig, close=True))
-                plt.close()
             self.logger.dump(step=self.num_timesteps)
 
         return True
