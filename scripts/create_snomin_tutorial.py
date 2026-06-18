@@ -6,7 +6,7 @@ from pathlib import Path
 # GitHub default branch is `master` (not `main`). Until the SNOMIN PR is merged,
 # point Colab + clone at the feature branch; switch to "master" after merge.
 GITHUB_BRANCH = "feature/pcse6-wofost-snomin-tutorial"
-COLAB_SETUP_VERSION = "2"  # bump when Colab install recipe changes
+COLAB_SETUP_VERSION = "3"  # bump when Colab install recipe changes
 COLAB_URL = (
     "https://colab.research.google.com/github/WUR-AI/PCSE-Gym/blob/"
     f"{GITHUB_BRANCH}/notebooks/tutorials/CropGym_WOFOST_SNOMIN_Tutorial.ipynb"
@@ -81,6 +81,11 @@ cells = [
         "            ['git', 'clone', '--depth', '1', '-b', REPO_BRANCH, REPO_URL, str(repo_root)],\n"
         "            check=True,\n"
         "        )\n"
+        "    else:\n"
+        "        # Always sync latest tutorial fixes from the feature branch\n"
+        "        subprocess.run(['git', 'fetch', 'origin', REPO_BRANCH, '--depth', '1'], cwd=repo_root, check=True)\n"
+        "        subprocess.run(['git', 'reset', '--hard', f'origin/{REPO_BRANCH}'], cwd=repo_root, check=True)\n"
+        "        print(f'Updated repo to latest {REPO_BRANCH}')\n"
         "    os.chdir(repo_root)\n"
         "\n"
         "    if not setup_marker.exists():\n"
@@ -104,6 +109,10 @@ cells = [
         "        os.kill(os.getpid(), 9)\n"
         "    else:\n"
         "        print('Dependencies installed — setting up paths')\n"
+        "        subprocess.run(\n"
+        "            [sys.executable, '-m', 'pip', 'install', '-q', '-e', str(repo_root), '--no-deps'],\n"
+        "            check=True,\n"
+        "        )\n"
         "else:\n"
         "    candidate = Path.cwd().resolve()\n"
         "    for _ in range(4):\n"
@@ -145,6 +154,7 @@ cells = [
         "import stable_baselines3\n"
         "\n"
         "from pcse_gym.envs.sb3 import get_config_dir\n"
+        "from pcse_gym.utils.nitrogen_helpers import SNOMIN_NITROGEN_LEVELS, get_nitrogen_levels\n"
         "\n"
         "config_dir = Path(get_config_dir())\n"
         "required = [\n"
@@ -162,6 +172,12 @@ cells = [
         "print('pcse', getattr(pcse, '__version__', 'installed'))\n"
         "print('gymnasium', gymnasium.__version__)\n"
         "print('stable-baselines3', stable_baselines3.__version__)\n"
+        "print('Nitrogen levels:', get_nitrogen_levels())\n"
+        "if get_nitrogen_levels() != SNOMIN_NITROGEN_LEVELS:\n"
+        "    raise RuntimeError(\n"
+        "        'Stale CropGym code detected. Re-run the Install cell '\n"
+        "        '(or delete /content/PCSE-Gym and install again).'\n"
+        "    )\n"
         "print('SNOMIN configs OK')"
     ),
     md("## 2. Imports and settings"),
@@ -179,7 +195,7 @@ cells = [
         "\n"
         "from pcse_gym.envs.winterwheat import WinterWheat\n"
         "from pcse_gym.envs.sb3 import get_model_kwargs, get_policy_kwargs\n"
-        "from pcse_gym.utils.eval import evaluate_policy\n"
+        "from pcse_gym.utils.eval import evaluate_policy, to_scalar\n"
         "from pcse_gym.utils.nitrogen_helpers import get_nitrogen_levels\n"
         "import pcse_gym.utils.defaults as defaults\n"
         "\n"
@@ -273,6 +289,7 @@ cells = [
        "(late Feb, late Mar, late Apr) — ~180 kg N/ha total."),
     code(
         "from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize\n"
+        "from pcse_gym.utils.eval import evaluate_policy, to_scalar\n"
         "\n"
         "def run_policy(policy, year, location):\n"
         "    env = make_env(year, location)\n"
@@ -293,9 +310,9 @@ cells = [
         "for name, policy in policies.items():\n"
         "    reward, info = run_policy(policy, year, location)\n"
         "    wso = info['WSO']\n"
-        "    final_wso = float(list(wso.values())[-1])\n"
-        "    total_n = float(sum(info['fertilizer'].values()))\n"
-        "    print(f'{name:20s} reward={float(reward):8.1f}  final WSO={final_wso:8.1f} kg/ha  total N={total_n:.1f} kg/ha')"
+        "    final_wso = to_scalar(list(wso.values())[-1])\n"
+        "    total_n = to_scalar(sum(info['fertilizer'].values()))\n"
+        "    print(f'{name:20s} reward={to_scalar(reward):8.1f}  final WSO={final_wso:8.1f} kg/ha  total N={total_n:.1f} kg/ha')"
     ),
     md(
         "## 6. Train a PPO agent (short demo)\n"
@@ -367,14 +384,15 @@ cells = [
     md("## 7. Evaluate the trained agent"),
     code(
         "from stable_baselines3.common.vec_env import DummyVecEnv\n"
+        "from pcse_gym.utils.eval import evaluate_policy, to_scalar\n"
         "\n"
         "eval_env = DummyVecEnv([lambda: make_env(2002, (52, 5.5))])\n"
         "rewards, infos = evaluate_policy(model, eval_env)\n"
         "info = infos[0]\n"
-        "print(f'RL reward: {float(rewards[0]):.1f}')\n"
-        "print(f'Final WSO: {float(list(info[\"WSO\"].values())[-1]):.1f} kg/ha')\n"
-        "print(f'Total N applied: {float(sum(info[\"fertilizer\"].values())):.1f} kg/ha')\n"
-        "print(f'Cumulative N loss: {float(list(info[\"NLOSSCUM\"].values())[-1]):.1f}')"
+        "print(f'RL reward: {to_scalar(rewards[0]):.1f}')\n"
+        "print(f'Final WSO: {to_scalar(list(info[\"WSO\"].values())[-1]):.1f} kg/ha')\n"
+        "print(f'Total N applied: {to_scalar(sum(info[\"fertilizer\"].values())):.1f} kg/ha')\n"
+        "print(f'Cumulative N loss: {to_scalar(list(info[\"NLOSSCUM\"].values())[-1]):.1f}')"
     ),
     code(
         "fig, ax = plt.subplots(1, 2, figsize=(12, 4))\n"

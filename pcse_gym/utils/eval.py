@@ -256,6 +256,11 @@ def compute_average(results_dict: dict, filter_list=None):
     return sum(filtered_results) / len(filtered_results)
 
 
+def to_scalar(x):
+    """Convert numpy arrays / 0-d or 1-d tensors to a Python float."""
+    return float(np.asarray(x).ravel()[0])
+
+
 def _standard_practice_action(env, amount=1):
     """Return action for standard practice baseline (3 split applications per season)."""
     try:
@@ -374,7 +379,7 @@ def evaluate_policy(
                         action = _standard_practice_action(env, amount)
             if policy == 'no-nitrogen':
                 action = [0]
-            episode_reward += float(np.asarray(reward).item())
+            episode_reward += to_scalar(reward)
             episode_length += 1
             infos_this_episode.append(info[0])
         variables = infos_this_episode[0].keys()
@@ -384,7 +389,7 @@ def evaluate_policy(
         for v in variables:
             for info_dict in infos_this_episode:
                 episode_info[v].update(info_dict[v])
-        episode_rewards.append(float(episode_reward))
+        episode_rewards.append(to_scalar(episode_reward))
         episode_infos.append(episode_info)
     if isinstance(policy, base_class.BaseAlgorithm) and policy.get_env() is not None:
         policy.get_env().training = training
@@ -421,7 +426,7 @@ class FindOptimum():
                     action = [x * 1.0]
                 info_this_episode, rew, terminated, _ = self.env.step(action)
                 reward = self.env.get_original_reward()
-                total_reward = total_reward + float(np.asarray(reward).item())
+                total_reward = total_reward + to_scalar(reward)
                 infos_this_episode.append(info_this_episode)
             self.current_rewards[self.env.get_attr("date")[0].year] = total_reward
         returnvalue = 0
@@ -601,7 +606,7 @@ class EvalCallback(BaseCallback):
                     sync_envs_normalization(self.model.get_env(), env_pcse_evaluation)
                     episode_rewards, episode_infos = evaluate_policy(policy=self.model, env=env_pcse_evaluation)
                     my_key = (year, test_location)
-                    reward[my_key] = float(np.asarray(episode_rewards[0]).item())
+                    reward[my_key] = to_scalar(episode_rewards[0])
                     if self.po_features:
                         episode_infos = self.get_measure_graphs(episode_infos)
                     fertilizer[my_key] = sum(episode_infos[0]['fertilizer'].values())
