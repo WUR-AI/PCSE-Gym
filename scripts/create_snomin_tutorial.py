@@ -3,6 +3,14 @@
 import json
 from pathlib import Path
 
+# GitHub default branch is `master` (not `main`). Until the SNOMIN PR is merged,
+# point Colab + clone at the feature branch; switch to "master" after merge.
+GITHUB_BRANCH = "feature/pcse6-wofost-snomin-tutorial"
+COLAB_URL = (
+    "https://colab.research.google.com/github/WUR-AI/PCSE-Gym/blob/"
+    f"{GITHUB_BRANCH}/notebooks/tutorials/CropGym_WOFOST_SNOMIN_Tutorial.ipynb"
+)
+
 
 def md(text):
     return {"cell_type": "markdown", "metadata": {}, "source": text.splitlines(keepends=True)}
@@ -29,7 +37,7 @@ cells = [
         "# CropGym tutorial: nitrogen management with WOFOST SNOMIN\n"
         "\n"
         "[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]"
-        "(https://colab.research.google.com/github/WUR-AI/PCSE-Gym/blob/main/notebooks/tutorials/CropGym_WOFOST_SNOMIN_Tutorial.ipynb)\n"
+        f"({COLAB_URL})\n"
         "\n"
         "This notebook is **self-contained for Google Colab**: run cells top-to-bottom. "
         "It installs CropGym, PCSE 6.x, and Stable-Baselines3 automatically.\n"
@@ -51,11 +59,15 @@ cells = [
         "\n"
         "IN_COLAB = 'google.colab' in sys.modules\n"
         "REPO_URL = 'https://github.com/WUR-AI/PCSE-Gym.git'\n"
+        f"REPO_BRANCH = '{GITHUB_BRANCH}'\n"
         "repo_root = Path('/content/PCSE-Gym') if IN_COLAB else Path.cwd()\n"
         "\n"
         "if IN_COLAB:\n"
         "    if not repo_root.exists():\n"
-        "        subprocess.run(['git', 'clone', '--depth', '1', REPO_URL, str(repo_root)], check=True)\n"
+        "        subprocess.run(\n"
+        "            ['git', 'clone', '--depth', '1', '-b', REPO_BRANCH, REPO_URL, str(repo_root)],\n"
+        "            check=True,\n"
+        "        )\n"
         "    else:\n"
         "        print(f'Repo already present at {repo_root}')\n"
         "    import os\n"
