@@ -187,6 +187,7 @@ cells = [
         "\n"
         "# PCSE 6.x + Colab traitlets: noisy but harmless DeprecationWarnings\n"
         "warnings.filterwarnings('ignore', category=DeprecationWarning, module='pcse')\n"
+        "warnings.filterwarnings('ignore', category=DeprecationWarning, module='jupyter_client')\n"
         "\n"
         "import matplotlib.pyplot as plt\n"
         "import pandas as pd\n"
@@ -322,6 +323,9 @@ cells = [
         "Increase `nsteps` for better policies (e.g. 50_000)."
     ),
     code(
+        "import warnings\n"
+        "warnings.filterwarnings('ignore', category=DeprecationWarning, module='jupyter_client')\n"
+        "\n"
         "from stable_baselines3 import PPO\n"
         "from stable_baselines3.common.monitor import Monitor\n"
         "from pcse_gym.utils.eval import EvalCallback\n"
