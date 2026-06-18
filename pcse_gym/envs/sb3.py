@@ -204,7 +204,7 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         n_levels = kwargs.get("n_nitrogen_levels")
         if n_levels is None and isinstance(action_space, gym.spaces.Discrete):
             n_levels = int(action_space.n)
-        self.nitrogen_levels = get_nitrogen_levels(n_levels or 5)
+        self.nitrogen_levels = get_nitrogen_levels(n_levels or int(action_space.n))
         self.rewards = Rewards(
             kwargs.get("reward_var"), self.timestep, self.costs_nitrogen
         )

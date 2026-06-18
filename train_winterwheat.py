@@ -86,7 +86,7 @@ def train(log_dir, n_steps,
                                  weather_features=weather_features,
                                  costs_nitrogen=costs_nitrogen, years=train_years, locations=train_locations,
                                  action_space=action_space, action_multiplier=1.0, seed=seed,
-                                 reward=reward, n_nitrogen_levels=getattr(action_space, "n", 5),
+                                 reward=reward, n_nitrogen_levels=getattr(action_space, "n", 4),
                                  **get_model_kwargs(pcse_model), **kwargs)
 
     env_pcse_train = Monitor(env_pcse_train)
@@ -129,7 +129,7 @@ def train(log_dir, n_steps,
                                 weather_features=weather_features,
                                 costs_nitrogen=costs_nitrogen, years=test_years, locations=test_locations,
                                 action_space=action_space, action_multiplier=1.0, reward=reward,
-                                n_nitrogen_levels=getattr(action_space, "n", 5),
+                                n_nitrogen_levels=getattr(action_space, "n", 4),
                                 **get_model_kwargs(pcse_model), **kwargs, seed=seed)
     # env_pcse_eval = ActionLimiter(env_pcse_eval, action_limit=4)
 

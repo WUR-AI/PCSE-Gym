@@ -57,8 +57,11 @@ def get_default_action_space():
     return gym.spaces.Discrete(3)
 
 
-def get_snomin_action_space(n_levels=5):
+def get_snomin_action_space(n_levels=None):
     import gymnasium as gym
+    from pcse_gym.utils.nitrogen_helpers import SNOMIN_NITROGEN_LEVELS
+    if n_levels is None:
+        n_levels = len(SNOMIN_NITROGEN_LEVELS)
     return gym.spaces.Discrete(n_levels)
 
 

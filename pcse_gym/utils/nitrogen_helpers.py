@@ -2,12 +2,21 @@
 
 m2_to_ha = 1e-4
 
+# Default discrete fertilizer rates for WOFOST SNOMIN (kg N/ha per application)
+SNOMIN_NITROGEN_LEVELS = [0.0, 30.0, 60.0, 90.0]
 
-def get_nitrogen_levels(n_levels=5):
-    """Discrete fertilizer levels in kg N/ha (0, 4, 6, 8, 10 for n_levels=5)."""
-    if n_levels <= 1:
-        return [0.0]
-    levels = [0.0, 4.0]
-    for i in range(2, n_levels):
-        levels.append(4.0 + (i - 1) * 0.5)
-    return levels
+
+def get_nitrogen_levels(n_levels=None, levels=None):
+    """Discrete fertilizer levels in kg N/ha for SNOMIN.
+
+    Default: 0, 30, 60, 90 kg N/ha.
+    """
+    if levels is not None:
+        return list(levels)
+    default = SNOMIN_NITROGEN_LEVELS
+    if n_levels is None:
+        return default.copy()
+    if n_levels <= len(default):
+        return default[:n_levels]
+    step = default[-1] / (n_levels - 1)
+    return [round(i * step, 1) for i in range(n_levels)]
