@@ -389,10 +389,16 @@ cells = [
     ),
     md("## 7. Evaluate the trained agent"),
     code(
-        "from stable_baselines3.common.vec_env import DummyVecEnv\n"
+        "from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize\n"
+        "from stable_baselines3.common.monitor import Monitor\n"
         "from pcse_gym.utils.eval import evaluate_policy, to_scalar\n"
         "\n"
-        "eval_env = DummyVecEnv([lambda: make_env(2002, (52, 5.5))])\n"
+        "eval_env = VecNormalize(\n"
+        "    DummyVecEnv([lambda: Monitor(make_env(2002, (52, 5.5))]),\n"
+        "    norm_obs=True, norm_reward=True, clip_obs=10.0, clip_reward=50.0, gamma=1,\n"
+        ")\n"
+        "eval_env.training = False\n"
+        "eval_env.norm_reward = True\n"
         "rewards, infos = evaluate_policy(model, eval_env)\n"
         "info = infos[0]\n"
         "print(f'RL reward: {to_scalar(rewards[0]):.1f}')\n"
