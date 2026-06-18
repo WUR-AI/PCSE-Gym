@@ -503,6 +503,13 @@ class EvalCallback(BaseCallback):
 
         self.histogram_training_locations = defaultdict(def_value)
 
+    def _record_figure(self, tag, fig):
+        """Log matplotlib figures to TensorBoard only (not stdout/log)."""
+        if not self.log_figures:
+            plt.close(fig)
+            return
+        self.logger.record(tag, Figure(fig, close=True), exclude=("stdout", "log"))
+
     def get_locations(self, log_training=False):
         if log_training:
             locations = list(set(self.test_locations + self.train_locations))
@@ -594,14 +601,14 @@ class EvalCallback(BaseCallback):
                    align='center')
             ax.set_xticks(range(len(self.histogram_training_years)), minor=False)
             ax.set_xticklabels(list(self.histogram_training_years.keys()), fontdict=None, minor=False, rotation=90)
-            self.logger.record(f'figures/training-years', Figure(fig, close=True))
+            self._record_figure('figures/training-years', fig)
 
             fig, ax = plt.subplots()
             ax.bar(range(len(self.histogram_training_locations)), list(self.histogram_training_locations.values()),
                    align='center')
             ax.set_xticks(range(len(self.histogram_training_locations)), minor=False)
             ax.set_xticklabels(list(self.histogram_training_locations.keys()), fontdict=None, minor=False)
-            self.logger.record(f'figures/training-locations', Figure(fig, close=True))
+            self._record_figure('figures/training-locations', fig)
 
             reward, fertilizer, result_model = {}, {}, {}
             log_training = self.get_do_log_training()
@@ -664,14 +671,12 @@ class EvalCallback(BaseCallback):
                     if plot_individual:
                         fig, ax = plt.subplots()
                         plot_variable(results_figure, variable=variable, ax=ax, ylim=get_ylim_dict()[variable])
-                        self.logger.record(f'figures/{variable}', Figure(fig, close=True))
-                        plt.close()
+                        self._record_figure(f'figures/{variable}', fig)
 
                     fig, ax = plt.subplots()
                     plot_variable(results_figure, variable=variable, ax=ax, ylim=get_ylim_dict()[variable],
                                   plot_average=True)
-                    self.logger.record(f'figures/avg-{variable}', Figure(fig, close=True))
-                    plt.close()
+                    self._record_figure(f'figures/avg-{variable}', fig)
             self.logger.dump(step=self.num_timesteps)
 
         return True
