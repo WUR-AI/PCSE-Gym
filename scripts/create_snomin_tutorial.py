@@ -291,9 +291,9 @@ cells = [
         "for name, policy in policies.items():\n"
         "    reward, info = run_policy(policy, year, location)\n"
         "    wso = info['WSO']\n"
-        "    final_wso = list(wso.values())[-1]\n"
-        "    total_n = sum(info['fertilizer'].values())\n"
-        "    print(f'{name:20s} reward={reward:8.1f}  final WSO={final_wso:8.1f} kg/ha  total N={total_n:.1f} kg/ha')"
+        "    final_wso = float(list(wso.values())[-1])\n"
+        "    total_n = float(sum(info['fertilizer'].values()))\n"
+        "    print(f'{name:20s} reward={float(reward):8.1f}  final WSO={final_wso:8.1f} kg/ha  total N={total_n:.1f} kg/ha')"
     ),
     md(
         "## 6. Train a PPO agent (short demo)\n"
@@ -369,10 +369,10 @@ cells = [
         "eval_env = DummyVecEnv([lambda: make_env(2002, (52, 5.5))])\n"
         "rewards, infos = evaluate_policy(model, eval_env)\n"
         "info = infos[0]\n"
-        "print(f'RL reward: {rewards[0]:.1f}')\n"
-        "print(f'Final WSO: {list(info[\"WSO\"].values())[-1]:.1f} kg/ha')\n"
-        "print(f'Total N applied: {sum(info[\"fertilizer\"].values()):.1f} kg/ha')\n"
-        "print(f'Cumulative N loss: {list(info[\"NLOSSCUM\"].values())[-1]:.1f}')"
+        "print(f'RL reward: {float(rewards[0]):.1f}')\n"
+        "print(f'Final WSO: {float(list(info[\"WSO\"].values())[-1]):.1f} kg/ha')\n"
+        "print(f'Total N applied: {float(sum(info[\"fertilizer\"].values())):.1f} kg/ha')\n"
+        "print(f'Cumulative N loss: {float(list(info[\"NLOSSCUM\"].values())[-1]):.1f}')"
     ),
     code(
         "fig, ax = plt.subplots(1, 2, figsize=(12, 4))\n"

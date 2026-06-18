@@ -338,7 +338,7 @@ def evaluate_policy(
                         action = [amount * 3]
             if policy == 'no-nitrogen':
                 action = [0]
-            episode_reward += reward
+            episode_reward += float(np.asarray(reward).item())
             episode_length += 1
             infos_this_episode.append(info[0])
         variables = infos_this_episode[0].keys()
@@ -348,7 +348,7 @@ def evaluate_policy(
         for v in variables:
             for info_dict in infos_this_episode:
                 episode_info[v].update(info_dict[v])
-        episode_rewards.append(episode_reward)
+        episode_rewards.append(float(episode_reward))
         episode_infos.append(episode_info)
     if isinstance(policy, base_class.BaseAlgorithm) and policy.get_env() is not None:
         policy.get_env().training = training
@@ -385,7 +385,7 @@ class FindOptimum():
                     action = [x * 1.0]
                 info_this_episode, rew, terminated, _ = self.env.step(action)
                 reward = self.env.get_original_reward()
-                total_reward = total_reward + reward
+                total_reward = total_reward + float(np.asarray(reward).item())
                 infos_this_episode.append(info_this_episode)
             self.current_rewards[self.env.get_attr("date")[0].year] = total_reward
         returnvalue = 0
