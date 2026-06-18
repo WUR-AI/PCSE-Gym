@@ -165,9 +165,12 @@ class AgroManagementContainer:
         return self.crop_end_date
 
 
-def get_weather_data_provider(location) -> pcse.db.NASAPowerWeatherDataProvider:
-    wdp = pcse.db.NASAPowerWeatherDataProvider(*location)
-    return wdp
+def get_weather_data_provider(location) -> pcse.input.NASAPowerWeatherDataProvider:
+    return pcse.input.NASAPowerWeatherDataProvider(*location)
+
+
+def _uses_snomin_model(model_config) -> bool:
+    return "SNOMIN" in os.path.basename(str(model_config))
 
 
 class Engine(pcse.engine.Engine):
@@ -186,6 +189,51 @@ class Engine(pcse.engine.Engine):
     def _terminate_simulation(self, day):
         super()._terminate_simulation(day)
         self._flag_terminated = True
+
+
+class SnominEngine(Engine):
+    """WOFOST SNOMIN engine: applies fertilizer at the end of each weekly step."""
+
+    def _run(self, action):
+        self.day, delt = self.timer()
+        self.integrate(self.day, delt)
+        self.drv = self._get_driving_variables(self.day)
+        self.agromanager(self.day, self.drv)
+
+        if action > 0:
+            self._send_signal(
+                signal=pcse.signals.apply_n_snomin,
+                amount=action,
+                application_depth=10.0,
+                cnratio=0.0,
+                f_orgmat=0.0,
+                f_NH4N=0.5,
+                f_NO3N=0.5,
+                initial_age=0,
+            )
+            self._send_signal(
+                signal=pcse.signals.apply_n,
+                amount=action,
+                recovery=0.7,
+                N_amount=action,
+                N_recovery=0.7,
+            )
+
+        self.calc_rates(self.day, self.drv)
+
+        if self.flag_terminate is True:
+            self._terminate_simulation(self.day)
+
+    def run(self, days=1, action=0):
+        days_counter = days
+        days_done = 0
+        while days_done < days and self.flag_terminate is False:
+            days_done += 1
+            days_counter -= 1
+            if days_counter > 0:
+                self._run(0)
+            else:
+                self._run(action)
 
 
 class PCSEEnv(gym.Env):
@@ -248,11 +296,11 @@ class PCSEEnv(gym.Env):
 
         # If any parameter files are specified as path, convert them to a suitable object for pcse
         if isinstance(crop_parameters, str):
-            crop_parameters = pcse.fileinput.PCSEFileReader(crop_parameters)
+            crop_parameters = pcse.input.PCSEFileReader(crop_parameters)
         if isinstance(site_parameters, str):
-            site_parameters = pcse.fileinput.PCSEFileReader(site_parameters)
+            site_parameters = pcse.input.PCSEFileReader(site_parameters)
         if isinstance(soil_parameters, str):
-            soil_parameters = pcse.fileinput.PCSEFileReader(soil_parameters)
+            soil_parameters = pcse.input.PCSEFileReader(soil_parameters)
 
         # Set location
         if location is None:
@@ -272,11 +320,15 @@ class PCSEEnv(gym.Env):
         # Initialize Agromanagement Container Class
         self.agmt = AgroManagementContainer(self._agro_management)
 
-        if years is not None:
-            self._agro_management = self.agmt.replace_years(years)
-
         # Store the PCSE Engine config
         self._model_config = model_config
+        self._uses_snomin = _uses_snomin_model(model_config)
+
+        if self._uses_snomin:
+            self.agmt.get_start_type(kwargs.get("start_type", "sowing"))
+
+        if years is not None:
+            self._agro_management = self.agmt.replace_years(years)
 
         # Get the weather data source
         self._weather_data_provider = get_weather_data_provider(self._location)
@@ -285,7 +337,7 @@ class PCSEEnv(gym.Env):
         self._model = self._init_pcse_model()
 
         # Use the config files to extract relevant settings
-        model_config = pcse.util.ConfigurationLoader(model_config)
+        model_config = pcse.base.ConfigurationLoader(model_config)
         self._output_variables = (
             model_config.OUTPUT_VARS
         )  # variables given by the PCSE model output
@@ -307,8 +359,8 @@ class PCSEEnv(gym.Env):
             sitedata=self._site_params,
             soildata=self._soil_params,
         )
-        # Create a PCSE engine / crop growth model
-        model = Engine(
+        engine_cls = SnominEngine if self._uses_snomin else Engine
+        model = engine_cls(
             self._parameter_provider,
             self._weather_data_provider,
             self._agro_management,
@@ -434,11 +486,13 @@ class PCSEEnv(gym.Env):
 
         # Apply action
         if isinstance(action, np.ndarray):
-            action = action[0]
-        self._apply_action(action)
-
-        # Run the crop growth model
-        self._model.run(days=self._timestep)
+            action = action.item() if action.size == 1 else action[0]
+        if self._uses_snomin:
+            action = self._apply_action(action)
+            self._model.run(days=self._timestep, action=action)
+        else:
+            self._apply_action(action)
+            self._model.run(days=self._timestep)
         # Get the model output
         output = self._model.get_output()[-self._timestep :]
         info["days"] = [day["day"] for day in output]
@@ -471,13 +525,11 @@ class PCSEEnv(gym.Env):
         )
 
         self._model._send_signal(
-            signal=pcse.signals.apply_npk,
+            signal=pcse.signals.apply_n,
             N_amount=N,
-            P_amount=P,
-            K_amount=K,
             N_recovery=0.7,
-            P_recovery=0.7,
-            K_recovery=0.7,
+            amount=N,
+            recovery=0.7,
         )
 
     def _get_observation(self, output) -> dict:

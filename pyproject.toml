@@ -16,7 +16,7 @@ gymnasium = "^0.29.1"
 pyyaml = "^6.0.1"
 numpy = "^1.26.4"
 datetime = "^5.5"
-pcse = "5.5.6"
+pcse = "^6.0.13"
 
 stable-baselines3 = { version = "^2.3.2", optional = true }
 sb3-contrib = { version = "^2.3.0", optional = true }
@@ -27,9 +27,11 @@ tensorboard = { version = "^2.17.0", optional = true }
 scipy = { version = "^1.13.1", optional = true }
 tqdm = { version = "^4.66.4", optional = true }
 pandas = { version = "^2.2.2", optional = true }
+seaborn = { version = "^0.13.2", optional = true }
+scikit-learn = { version = "^1.5.0", optional = true }
 
 [tool.poetry.extras]
-sb-integration = ["stable-baselines3", "sb3-contrib", "matplotlib", "torch", "lib-programname", "tensorboard", "scipy", "tqdm", "pandas"]
+sb-integration = ["stable-baselines3", "sb3-contrib", "matplotlib", "torch", "lib-programname", "tensorboard", "scipy", "tqdm", "pandas", "seaborn", "scikit-learn"]
 
 [build-system]
 requires = ["poetry-core"]

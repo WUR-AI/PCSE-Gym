@@ -61,7 +61,7 @@ def train(log_dir, n_steps,
 
     """
 
-    pcse_model_name = "LINTUL" if not pcse_model else "WOFOST"
+    pcse_model_name = defaults.get_model_name(pcse_model)
 
     print(f'Train model {pcse_model_name} with {agent} algorithm and seed {seed}. Logdir: {log_dir}')
     if agent == 'PPO' or 'RPPO':
@@ -86,7 +86,8 @@ def train(log_dir, n_steps,
                                  weather_features=weather_features,
                                  costs_nitrogen=costs_nitrogen, years=train_years, locations=train_locations,
                                  action_space=action_space, action_multiplier=1.0, seed=seed,
-                                 reward=reward, **get_model_kwargs(pcse_model), **kwargs)
+                                 reward=reward, n_nitrogen_levels=getattr(action_space, "n", 5),
+                                 **get_model_kwargs(pcse_model), **kwargs)
 
     env_pcse_train = Monitor(env_pcse_train)
 
@@ -128,6 +129,7 @@ def train(log_dir, n_steps,
                                 weather_features=weather_features,
                                 costs_nitrogen=costs_nitrogen, years=test_years, locations=test_locations,
                                 action_space=action_space, action_multiplier=1.0, reward=reward,
+                                n_nitrogen_levels=getattr(action_space, "n", 5),
                                 **get_model_kwargs(pcse_model), **kwargs, seed=seed)
     # env_pcse_eval = ActionLimiter(env_pcse_eval, action_limit=4)
 
@@ -147,7 +149,7 @@ if __name__ == '__main__':
     parser.add_argument("-n", "--nsteps", type=int, default=400000, help="Number of steps")
     parser.add_argument("-c", "--costs_nitrogen", type=float, default=10.0, help="Costs for nitrogen")
     parser.add_argument("-e", "--environment", type=int, default=0,
-                        help="Crop growth model. 0 for LINTUL-3, 1 for WOFOST")
+                        help="Crop model: 0=LINTUL-3, 1=WOFOST80, 2=WOFOST SNOMIN")
     parser.add_argument("-a", "--agent", type=str, default="PPO", help="RL agent. PPO, RPPO, or DQN.")
     parser.add_argument("-r", "--reward", type=str, default="DEF", help="Reward function. DEF, or GRO")
     parser.add_argument('-d', "--device", type=str, default="cpu")
@@ -167,6 +169,8 @@ if __name__ == '__main__':
     test_locations = [(52, 5.5), (48, 0)]
 
     tag = f'Seed-{args.seed}'
+    action_space = (defaults.get_snomin_action_space()
+                    if args.environment == 2 else defaults.get_default_action_space())
 
     train(log_dir, train_years=train_years, test_years=test_years,
           train_locations=train_locations,
@@ -176,6 +180,6 @@ if __name__ == '__main__':
           crop_features=defaults.get_default_crop_features(pcse_env=args.environment),
           weather_features=defaults.get_default_weather_features(),
           action_features=defaults.get_default_action_features(),
-          action_space=defaults.get_default_action_space(),
+          action_space=action_space,
           pcse_model=args.environment, agent=args.agent,
           reward=args.reward, device=args.device)

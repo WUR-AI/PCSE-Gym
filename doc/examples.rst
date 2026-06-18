@@ -15,7 +15,7 @@ Here we show a basic example of how to use the PCSE Environment. This example re
    from pcse_gym.envs.common_env import PCSEEnv
 
    # PCSE contains various utility classes to load parameter configurations
-   from pcse.fileinput import CABOFileReader, YAMLCropDataProvider
+   from pcse.input import CABOFileReader, YAMLCropDataProvider
    from pcse.util import WOFOST80SiteDataProvider
 
    # Create and configure a PCSE-Gym environment
@@ -188,7 +188,7 @@ PCSEEnvironment class, but has a modified reward function.
 .. code:: python
 
 
-   from pcse.fileinput import CABOFileReader, YAMLCropDataProvider
+   from pcse.input import CABOFileReader, YAMLCropDataProvider
    from pcse.util import WOFOST80SiteDataProvider
 
    env = CustomPCSEEnv(

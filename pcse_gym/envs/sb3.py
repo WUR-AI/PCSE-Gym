@@ -1,4 +1,5 @@
 import os
+import yaml
 from datetime import date
 from collections import defaultdict
 import gymnasium as gym
@@ -12,6 +13,7 @@ import numpy as np
 import pcse_gym.envs.common_env as common_env
 import pcse_gym.utils.defaults as defaults
 import pcse_gym.utils.process_pcse_output as process_pcse
+from pcse_gym.utils.nitrogen_helpers import get_nitrogen_levels, m2_to_ha
 from .rewards import Rewards
 
 
@@ -101,21 +103,44 @@ def get_config_dir():
     return config_dir
 
 
-def get_wofost_kwargs(config_dir=get_config_dir()):
-    wofost_kwargs = dict(
-        model_config=os.path.join(config_dir, "Wofost80_NWLP_FD.conf"),
-        agro_config=os.path.join(config_dir, "agro", "wheat_cropcalendar.yaml"),
-        crop_parameters=pcse.fileinput.YAMLCropDataProvider(
+def get_wofost_kwargs(config_dir=get_config_dir(), model_file="Wofost80_NWLP_FD.conf",
+                      agro_file="wheat_cropcalendar.yaml", pcse_model=1):
+    if pcse_model == 2:
+        soil_params = yaml.safe_load(
+            open(os.path.join(config_dir, "soil", "arminda_soil.yaml"))
+        )
+        site_params = yaml.safe_load(
+            open(os.path.join(config_dir, "site", "arminda_site.yaml"))
+        )
+    else:
+        soil_params = pcse.input.CABOFileReader(
+            os.path.join(config_dir, "soil", "ec3.CAB")
+        )
+        site_params = {
+            "WAV": 10,
+            "NAVAILI": 10,
+            "PAVAILI": 50,
+            "KAVAILI": 100,
+            "CO2": 360,
+        }
+    return dict(
+        model_config=os.path.join(config_dir, model_file),
+        agro_config=os.path.join(config_dir, "agro", agro_file),
+        crop_parameters=pcse.input.YAMLCropDataProvider(
             fpath=os.path.join(config_dir, "crop"), force_reload=True
         ),
-        site_parameters=pcse.util.WOFOST80SiteDataProvider(
-            WAV=10, NAVAILI=10, PAVAILI=50, KAVAILI=100
-        ),
-        soil_parameters=pcse.fileinput.CABOFileReader(
-            os.path.join(config_dir, "soil", "ec3.CAB")
-        ),
+        site_parameters=site_params,
+        soil_parameters=soil_params,
     )
-    return wofost_kwargs
+
+
+def get_wofost_snomin_kwargs(config_dir=get_config_dir()):
+    return get_wofost_kwargs(
+        config_dir=config_dir,
+        model_file="Wofost81_NWLP_MLWB_SNOMIN.conf",
+        agro_file="wheat_cropcalendar_snomin.yaml",
+        pcse_model=2,
+    )
 
 
 def get_lintul_kwargs(config_dir=get_config_dir()):
@@ -135,9 +160,11 @@ def get_model_kwargs(pcse_model):
     if pcse_model == 0:
         return get_lintul_kwargs()
     elif pcse_model == 1:
-        return get_wofost_kwargs()
+        return get_wofost_kwargs(pcse_model=1)
+    elif pcse_model == 2:
+        return get_wofost_snomin_kwargs()
     else:
-        raise Exception("Choose 0 or 1 for the environment")
+        raise Exception("Choose 0 (LINTUL), 1 (WOFOST80), or 2 (WOFOST SNOMIN)")
 
 
 class StableBaselinesWrapper(common_env.PCSEEnv):
@@ -173,20 +200,26 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         )
         self.action_space = action_space
         self.action_multiplier = action_multiplier
+        self._uses_snomin = common_env._uses_snomin_model(kwargs.get("model_config", ""))
+        n_levels = kwargs.get("n_nitrogen_levels")
+        if n_levels is None and isinstance(action_space, gym.spaces.Discrete):
+            n_levels = int(action_space.n)
+        self.nitrogen_levels = get_nitrogen_levels(n_levels or 5)
         self.rewards = Rewards(
             kwargs.get("reward_var"), self.timestep, self.costs_nitrogen
         )
         super().reset(seed=seed)
 
-    def _get_observation_space(self):
-        nvars = (
-            len(self.crop_features)
-            + len(self.action_features)
-            + len(self.weather_features) * self.timestep
-        )
-        return gym.spaces.Box(0, np.inf, shape=(nvars,))
+    def _resolve_fertilizer_kg(self, action):
+        if isinstance(action, (np.ndarray, list)):
+            action = int(action.item()) if hasattr(action, "item") else int(action[0])
+        if isinstance(self.action_space, gym.spaces.Discrete):
+            return self.nitrogen_levels[action]
+        return float(action) * self.action_multiplier
 
     def _apply_action(self, action):
+        if self._uses_snomin:
+            return self._resolve_fertilizer_kg(action)
         amount = action * self.action_multiplier
         recovery_rate = 0.7
         self._model._send_signal(
@@ -195,15 +228,6 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
             N_recovery=recovery_rate,
             amount=amount,
             recovery=recovery_rate,
-        )
-        self._model._send_signal(
-            signal=pcse.signals.apply_npk,
-            N_amount=amount * 10,
-            N_recovery=recovery_rate,
-            P_amount = 100,
-            P_recovery = 1.0,
-            K_amount=100,
-            K_recovery=1.0,
         )
 
     def _get_reward(self):
@@ -222,7 +246,10 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
 
         # populate reward
         pcse_output = self.model.get_output()
-        amount = action * self.action_multiplier
+        if self._uses_snomin:
+            amount = self._resolve_fertilizer_kg(action)
+        else:
+            amount = action * self.action_multiplier
         reward, growth = self.rewards.growth_storage_organ(pcse_output, amount)
 
         # populate info
@@ -238,6 +265,25 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         info = update_info(info, "reward", self.date, reward)
 
         return observation, reward, terminated, truncated, info
+
+    def _get_observation_space(self):
+        nvars = (
+            len(self.crop_features)
+            + len(self.action_features)
+            + len(self.weather_features) * self.timestep
+        )
+        low = -np.inf if self._uses_snomin else 0
+        return gym.spaces.Box(low, np.inf, shape=(nvars,))
+
+    def _crop_feature_value(self, observation, feature):
+        if feature in ["SM", "NH4", "NO3", "WC"]:
+            values = observation["crop_model"][feature][-1]
+            if feature in ["NH4", "NO3"]:
+                return sum(values) / m2_to_ha
+            return float(np.mean(values))
+        if feature in ["RNO3DEPOSTT", "RNH4DEPOSTT"]:
+            return observation["crop_model"][feature][-1] / m2_to_ha
+        return observation["crop_model"][feature][-1]
 
     def reset(self, seed=None, return_info=False, options=None):
 
@@ -256,7 +302,7 @@ class StableBaselinesWrapper(common_env.PCSEEnv):
         if isinstance(observation, tuple):
             observation = observation[0]
         for i, feature in enumerate(self.crop_features):
-            obs[i] = observation["crop_model"][feature][-1]
+            obs[i] = self._crop_feature_value(observation, feature)
 
         for i, feature in enumerate(self.action_features):
             j = len(self.crop_features) + i

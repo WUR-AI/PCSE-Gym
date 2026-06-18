@@ -20,4 +20,4 @@ class TestCeres(unittest.TestCase):
 
     def test_multiple_years(self):
         ceres_result = FindOptimum(self.env, [1992, 2002]).optimize_start_dump().item()
-        self.assertAlmostEqual(30.05, ceres_result, 1)
+        self.assertAlmostEqual(29.92, ceres_result, 1)

@@ -100,7 +100,10 @@ class WinterWheat(gym.Env):
 
         if isinstance(action, np.ndarray):
             action = action.item()
-        amount = action * self.action_multiplier
+        if hasattr(self.sb3_env, "_uses_snomin") and self.sb3_env._uses_snomin:
+            amount = self.sb3_env._resolve_fertilizer_kg(action)
+        else:
+            amount = action * self.action_multiplier
         reward, growth = self.get_reward_and_growth(output, amount)
         return obs, reward, growth
 

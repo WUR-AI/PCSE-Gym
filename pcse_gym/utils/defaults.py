@@ -1,23 +1,34 @@
 def get_lintul_default_crop_features():
-    # See get_titles() for description of variables
     return ["DVS", "TGROWTH", "LAI", "NUPTT", "TRAN", "TNSOIL", "TRAIN", "TRANRF", "WSO"]
 
 
 def get_wofost_default_crop_features():
-    # See get_titles() for description of variables
     return ["DVS", "TAGP", "LAI", "NuptakeTotal", "TRA", "NAVAIL", "SM", "RFTRA", "TWSO"]
 
 
+def get_snomin_default_crop_features():
+    """Observation features for WOFOST 8.1 with SNOMIN soil nitrogen dynamics."""
+    return [
+        "DVS",
+        "LAI",
+        "WSO",
+        "NuptakeTotal",
+        "NO3",
+        "NH4",
+        "NLOSSCUM",
+        "NamountSO",
+    ]
+
+
 def get_default_crop_features(pcse_env=1):
-    if pcse_env:
-        crop_features = get_wofost_default_crop_features()
-    else:
-        crop_features = get_lintul_default_crop_features()
-    return crop_features
+    if pcse_env == 0:
+        return get_lintul_default_crop_features()
+    if pcse_env == 2:
+        return get_snomin_default_crop_features()
+    return get_wofost_default_crop_features()
 
 
 def get_default_weather_features():
-    # See get_titles() for description of variables
     return ["IRRAD", "TMIN", "RAIN"]
 
 
@@ -34,18 +45,22 @@ def get_default_years():
 
 
 def get_default_train_years():
-    all_years = get_default_years()
-    train_years = [year for year in all_years if year % 2 == 1]
-    return train_years
+    return [year for year in get_default_years() if year % 2 == 1]
 
 
 def get_default_test_years():
-    all_years = get_default_years()
-    test_years = [year for year in all_years if year % 2 == 0]
-    return test_years
+    return [year for year in get_default_years() if year % 2 == 0]
 
 
 def get_default_action_space():
     import gymnasium as gym
-    action_spaces = gym.spaces.Discrete(3)
-    return action_spaces
+    return gym.spaces.Discrete(3)
+
+
+def get_snomin_action_space(n_levels=5):
+    import gymnasium as gym
+    return gym.spaces.Discrete(n_levels)
+
+
+def get_model_name(pcse_env):
+    return {0: "LINTUL", 1: "WOFOST", 2: "WOFOST-SNOMIN"}.get(pcse_env, "WOFOST")

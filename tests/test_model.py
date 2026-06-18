@@ -19,8 +19,8 @@ class TestModel(unittest.TestCase):
         model_cropgym = PPO.load(
             model_path,
             custom_objects=custom_objects,
-            device="cuda",
-            print_system_info=True,
+            device="cpu",
+            print_system_info=False,
         )
         rewards_model, results_model = {}, {}
         test_years = [1992, 2002]
@@ -44,14 +44,14 @@ class TestModel(unittest.TestCase):
                 )
         summary = summarize_results(results_model)
         self.assertAlmostEqual(
-            summary.loc[[(1992, (48, 0))]]["WSO"].values[0], 263.7, 0
+            summary.loc[[(1992, (48, 0))]]["WSO"].values[0], 265.1, 0
         )
         self.assertAlmostEqual(
-            summary.loc[[(1992, (48, 0))]]["reward"].values[0], 25.6, 0
+            summary.loc[[(1992, (48, 0))]]["reward"].values[0], 27.5, 0
         )
         self.assertAlmostEqual(
-            summary.loc[[(2002, (52, 5.5))]]["WSO"].values[0], 705.6, 0
+            summary.loc[[(2002, (52, 5.5))]]["WSO"].values[0], 676.6, 0
         )
         self.assertAlmostEqual(
-            summary.loc[[(2002, (52, 5.5))]]["reward"].values[0], 252.6, 0
+            summary.loc[[(2002, (52, 5.5))]]["reward"].values[0], 244.8, 0
         )

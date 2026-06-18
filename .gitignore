@@ -2,3 +2,7 @@
 _notebooks_old/nitrogen-winterwheat/tensorboard_logs
 _notebooks_old/nitrogen-winterwheat/.ipynb_checkpoints
 .pyc
+.pcse_logs/
+notebooks/nitrogen-winterwheat/results/
+notebooks/nitrogen-winterwheat/tensorboard_logs/
+.pytest_cache/
