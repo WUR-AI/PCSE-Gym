@@ -268,7 +268,9 @@ cells = [
         "plt.tight_layout()\n"
         "plt.show()"
     ),
-    md("## 5. Compare baseline policies"),
+    md("## 5. Compare baseline policies\n\n"
+       "Standard practice applies **60 kg N/ha** at each of three split dates "
+       "(late Feb, late Mar, late Apr) — ~180 kg N/ha total."),
     code(
         "from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize\n"
         "\n"

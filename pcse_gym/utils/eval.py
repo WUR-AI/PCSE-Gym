@@ -232,6 +232,18 @@ def compute_average(results_dict: dict, filter_list=None):
     return sum(filtered_results) / len(filtered_results)
 
 
+def _standard_practice_action(env, amount=1):
+    """Return action for standard practice baseline (3 split applications per season)."""
+    try:
+        sb3_env = env.get_attr("sb3_env")[0]
+        if getattr(sb3_env, "_uses_snomin", False):
+            from pcse_gym.utils.nitrogen_helpers import get_standard_practice_action_index
+            return [get_standard_practice_action_index(sb3_env.nitrogen_levels)]
+    except (AttributeError, IndexError, TypeError):
+        pass
+    return [amount * 3]
+
+
 def evaluate_policy(
         policy,
         env: Union[gym.Env, VecEnv],
@@ -335,7 +347,7 @@ def evaluate_policy(
                 date = env.get_attr("date")[0]
                 for fert_date in fert_dates:
                     if date > fert_date and date <= fert_date + datetime.timedelta(7):
-                        action = [amount * 3]
+                        action = _standard_practice_action(env, amount)
             if policy == 'no-nitrogen':
                 action = [0]
             episode_reward += float(np.asarray(reward).item())
