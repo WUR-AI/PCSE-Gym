@@ -55,7 +55,10 @@ cells = [
         "Then run the install cell again (fast), then continue with the cells below.\n"
         "\n"
         "> Pip may warn about other Colab packages (jax, opencv, etc.) — safe to ignore; "
-        "this tutorial does not use them."
+        "this tutorial does not use them.\n"
+        "\n"
+        "> PCSE may print **traitlets DeprecationWarnings** when starting a simulation — "
+        "these are harmless upstream warnings and do not affect results."
     ),
     md("## 1. Install CropGym (Colab)"),
     code(
@@ -164,6 +167,11 @@ cells = [
     md("## 2. Imports and settings"),
     code(
         "import os\n"
+        "import warnings\n"
+        "\n"
+        "# PCSE 6.x + Colab traitlets: noisy but harmless DeprecationWarnings\n"
+        "warnings.filterwarnings('ignore', category=DeprecationWarning, module='pcse')\n"
+        "\n"
         "import matplotlib.pyplot as plt\n"
         "import pandas as pd\n"
         "import numpy as np\n"
