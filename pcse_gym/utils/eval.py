@@ -33,6 +33,30 @@ def get_cumulative_variables():
     return ['fertilizer', 'reward']
 
 
+def get_yield_variable(pcse_model):
+    """Storage organ variable name in episode info (WOFOST80 uses TWSO, LINTUL/SNOMIN use WSO)."""
+    return "TWSO" if pcse_model == 1 else "WSO"
+
+
+def get_train_log_variables(pcse_model, po_features=False):
+    variables = ["action", get_yield_variable(pcse_model), "reward"]
+    if po_features:
+        variables.append("measure")
+    return variables, ["action", "reward"]
+
+
+def get_eval_log_variables(pcse_model, po_features=False):
+    if pcse_model == 1:
+        variables = ["action", "TWSO", "reward", "NAVAIL", "NuptakeTotal", "fertilizer", "val"]
+    elif pcse_model == 2:
+        variables = ["action", "WSO", "reward", "NLOSSCUM", "NuptakeTotal", "fertilizer", "val"]
+    else:
+        variables = ["action", "WSO", "reward", "TNSOIL", "val"]
+    if po_features:
+        variables.append("measure")
+    return variables
+
+
 def get_ylim_dict():
     def def_value():
         return None
@@ -516,14 +540,7 @@ class EvalCallback(BaseCallback):
             stats_path = os.path.join(tensorboard_logdir, f'env-{self.n_calls}.pkl')
             self.model.get_env().save(stats_path)
             episode_rewards, episode_infos = evaluate_policy(policy=self.model, env=self.model.get_env())
-            if self.pcse_model:
-                variables = ['action', 'TWSO', 'reward']
-                if self.po_features: variables.append('measure')
-                cumulative = ['action', 'reward']
-            else:
-                variables = ['action', 'WSO', 'reward']
-                if self.po_features: variables.append('measure')
-                cumulative = ['action', 'reward']
+            variables, cumulative = get_train_log_variables(self.pcse_model, self.po_features)
 
             '''logic for measure graph'''
             if 'measure' in variables:
@@ -531,6 +548,8 @@ class EvalCallback(BaseCallback):
                 episode_infos = self.get_measure_graphs(episode_infos)
 
             for i, variable in enumerate(variables):
+                if variable not in episode_infos[0]:
+                    continue
                 n_timepoints = len(episode_infos[0][variable])
                 n_episodes = len(episode_infos)
                 episode_results = np.empty((n_episodes, n_timepoints))
@@ -582,7 +601,7 @@ class EvalCallback(BaseCallback):
                     sync_envs_normalization(self.model.get_env(), env_pcse_evaluation)
                     episode_rewards, episode_infos = evaluate_policy(policy=self.model, env=env_pcse_evaluation)
                     my_key = (year, test_location)
-                    reward[my_key] = episode_rewards[0].item()
+                    reward[my_key] = float(np.asarray(episode_rewards[0]).item())
                     if self.po_features:
                         episode_infos = self.get_measure_graphs(episode_infos)
                     fertilizer[my_key] = sum(episode_infos[0]['fertilizer'].values())
@@ -608,13 +627,7 @@ class EvalCallback(BaseCallback):
                 self.logger.record(f'eval/reward-median-train', compute_median(reward, train_keys))
                 self.logger.record(f'eval/nitrogen-median-train', compute_median(fertilizer, train_keys))
 
-            if self.pcse_model:
-                variables = ['action', 'TWSO', 'reward', 'NAVAIL',
-                             'NuptakeTotal', 'fertilizer', 'val']
-                if self.po_features: variables.append('measure')
-            else:
-                variables = ['action', 'WSO', 'reward', 'TNSOIL', 'val']
-                if self.po_features: variables.append('measure')
+            variables = get_eval_log_variables(self.pcse_model, self.po_features)
 
             keys_figure = [(a, b) for a in self.test_years for b in self.test_locations]
             results_figure = {filter_key: result_model[filter_key] for filter_key in keys_figure}
